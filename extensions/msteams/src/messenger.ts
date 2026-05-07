@@ -220,7 +220,7 @@ export function renderReplyPayloadsToMessages(
   const tableMode =
     options.tableMode ??
     getMSTeamsRuntime().channel.text.resolveMarkdownTableMode({
-      cfg: getMSTeamsRuntime().config.loadConfig(),
+      cfg: getMSTeamsRuntime().config.current(),
       channel: "msteams",
     });
 

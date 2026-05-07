@@ -49,7 +49,7 @@ const packageManifestContractTests: PackageManifestContractParams[] = [
   },
   {
     pluginId: "msteams",
-    pluginLocalRuntimeDeps: ["@azure/identity", "@microsoft/teams.api", "@microsoft/teams.apps"],
+    pluginLocalRuntimeDeps: ["@azure/identity", "@microsoft/teams.apps"],
     minHostVersionBaseline: "2026.3.22",
   },
   { pluginId: "nextcloud-talk", minHostVersionBaseline: "2026.3.22" },

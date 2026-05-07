@@ -428,7 +428,7 @@ export function createMSTeamsReplyDispatcher(params: {
                 : {}),
               ...(Array.isArray(payload?.steps) &&
               payload.steps.every((s: unknown) => typeof s === "string")
-                ? { steps: payload.steps as string[] }
+                ? { steps: payload.steps }
                 : {}),
             }),
           );
