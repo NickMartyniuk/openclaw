@@ -33,7 +33,6 @@ import {
   type MSTeamsApp,
   type MSTeamsCardActionResponse,
 } from "./sdk.js";
-import { runMSTeamsSigninInvokeHandler } from "./signin-invoke.js";
 import { createMSTeamsSsoTokenStoreFs } from "./sso-token-store.js";
 import type { MSTeamsSsoDeps } from "./sso.js";
 import { resolveMSTeamsCredentials } from "./token.js";
@@ -267,9 +266,10 @@ export async function monitorMSTeamsProvider(
   // applies before either the bearer gate or the SDK's authorize step run.
   expressApp.use(express.json({ limit: DEFAULT_WEBHOOK_MAX_BODY_BYTES }));
 
-  // Cheap pre-parse auth gate: reject requests without a Bearer token before
-  // spending CPU/memory on JSON body parsing. This prevents unauthenticated
-  // request floods from forcing body parsing on internet-exposed webhooks.
+  // Cheap auth-presence gate: reject requests without a Bearer token after the
+  // bounded JSON parser above, but before SDK route dispatch and full JWT
+  // validation. This blocks no-auth floods while the body limit protects
+  // bearer-shaped junk requests from unbounded pre-auth parsing.
   expressApp.use((req: Request, res: Response, next: (err?: unknown) => void) => {
     const auth = req.headers.authorization;
     if (!auth || !auth.startsWith("Bearer ")) {
@@ -287,6 +287,9 @@ export async function monitorMSTeamsProvider(
   const { app } = await loadMSTeamsSdkWithAuth(creds, {
     httpServerAdapter: await createMSTeamsExpressAdapter(expressApp),
     messagingEndpoint: configuredPath,
+    ...(msteamsCfg.sso?.enabled && msteamsCfg.sso.connectionName
+      ? { oauthDefaultConnectionName: msteamsCfg.sso.connectionName }
+      : {}),
   });
 
   // Existing Azure Bot registrations may still point at the legacy
@@ -436,21 +439,56 @@ export async function monitorMSTeamsProvider(
     await runMSTeamsFileConsentInvokeHandler(adaptSdkContext(ctx, app), log);
   });
 
-  // SSO sign-in invokes. Registering these as user routes replaces the
-  // SDK's built-in `signin.token-exchange` / `signin.verify-state` system
-  // defaults — the SDK's router removes a default when a user route shares
-  // its name. The SDK defaults would otherwise call
-  // `api.users.token.exchange` themselves and emit a `signin` event that
-  // nobody currently subscribes to. Our handler runs alone, persists the
-  // token via `MSTeamsSsoTokenStore`, and the SDK wraps the void return
-  // into the HTTP 200 InvokeResponse. The legacy
-  // `ctx.sendActivity({ type: "invokeResponse", … })` ack is gone.
-  app.on("signin.token-exchange", async (ctx) => {
-    await runMSTeamsSigninInvokeHandler(adaptSdkContext(ctx, app), handlerDeps);
-  });
-  app.on("signin.verify-state", async (ctx) => {
-    await runMSTeamsSigninInvokeHandler(adaptSdkContext(ctx, app), handlerDeps);
-  });
+  // SSO sign-in invokes use the SDK's built-in `signin.token-exchange` and
+  // `signin.verify-state` system routes. Those routes preserve Teams' expected
+  // InvokeResponse semantics, including returning 412 when silent token exchange
+  // needs interactive consent. We only subscribe to successful sign-ins so we
+  // can persist the delegated token for later OpenClaw use.
+  if (ssoDeps) {
+    app.event("signin", (ctx) => {
+      const activity = ctx.activity as {
+        from?: { id?: string; aadObjectId?: string };
+      };
+      const userIds = Array.from(
+        new Set(
+          [activity.from?.id, activity.from?.aadObjectId].filter((id): id is string => Boolean(id)),
+        ),
+      );
+      const connectionName = ctx.token.connectionName || ssoDeps.connectionName;
+      if (!connectionName || !ctx.token.token || userIds.length === 0) {
+        log.warn?.("msteams sso signin event missing token metadata", {
+          hasConnectionName: Boolean(connectionName),
+          hasToken: Boolean(ctx.token.token),
+          hasUser: userIds.length > 0,
+        });
+        return;
+      }
+
+      void Promise.all(
+        userIds.map((userId) =>
+          ssoDeps.tokenStore.save({
+            connectionName,
+            userId,
+            token: ctx.token.token,
+            expiresAt: ctx.token.expiration,
+            updatedAt: new Date().toISOString(),
+          }),
+        ),
+      )
+        .then(() => {
+          log.info("msteams sso token persisted", {
+            connectionName,
+            userIdCount: userIds.length,
+            hasExpiry: Boolean(ctx.token.expiration),
+          });
+        })
+        .catch((err: unknown) => {
+          log.error("msteams sso token persistence failed", {
+            error: formatUnknownError(err),
+          });
+        });
+    });
+  }
 
   // Feedback (thumbs up/down) on AI-generated messages. Teams delivers
   // this as a `message/submitAction` invoke; the typed-route registration

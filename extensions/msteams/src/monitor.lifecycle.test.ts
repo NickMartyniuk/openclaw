@@ -126,9 +126,10 @@ const registerMSTeamsHandlers = vi.hoisted(() =>
   vi.fn<RegisterMSTeamsHandlersMock>((handler) => handler),
 );
 const loadMSTeamsSdkWithAuth = vi.hoisted(() =>
-  vi.fn(async () => ({
+  vi.fn(async (_creds?: unknown, _options?: unknown) => ({
     app: {
       on: vi.fn(),
+      event: vi.fn(),
       initialize: vi.fn(async () => {}),
       tokenManager: {
         getBotToken: vi.fn(async () => ({ toString: (): string => "bot-token" })),
@@ -137,6 +138,12 @@ const loadMSTeamsSdkWithAuth = vi.hoisted(() =>
     },
   })),
 );
+
+const ssoTokenStore = vi.hoisted(() => ({
+  get: vi.fn(async () => null),
+  save: vi.fn(async () => {}),
+  remove: vi.fn(async () => false),
+}));
 
 vi.mock("@microsoft/teams.apps", () => ({
   ExpressAdapter: vi.fn(),
@@ -157,7 +164,8 @@ vi.mock("./resolve-allowlist.js", () => ({
 }));
 
 vi.mock("./sdk.js", () => ({
-  loadMSTeamsSdkWithAuth: () => loadMSTeamsSdkWithAuth(),
+  loadMSTeamsSdkWithAuth: (creds?: unknown, options?: unknown) =>
+    loadMSTeamsSdkWithAuth(creds, options),
   createMSTeamsTokenProvider: () => ({
     getAccessToken: vi.fn().mockResolvedValue("mock-token"),
   }),
@@ -174,6 +182,7 @@ vi.mock("./runtime.js", () => ({
       getChildLogger: () => ({
         info: vi.fn(),
         error: vi.fn(),
+        warn: vi.fn(),
         debug: vi.fn(),
       }),
     },
@@ -183,6 +192,10 @@ vi.mock("./runtime.js", () => ({
       },
     },
   }),
+}));
+
+vi.mock("./sso-token-store.js", () => ({
+  createMSTeamsSsoTokenStoreFs: () => ssoTokenStore,
 }));
 
 import { monitorMSTeamsProvider } from "./monitor.js";
@@ -253,6 +266,9 @@ describe("monitorMSTeamsProvider lifecycle", () => {
     isDangerousNameMatchingEnabled.mockReset().mockReturnValue(false);
     resolveAllowlistMocks.resolveMSTeamsChannelAllowlist.mockReset().mockResolvedValue([]);
     resolveAllowlistMocks.resolveMSTeamsUserAllowlist.mockReset().mockResolvedValue([]);
+    ssoTokenStore.get.mockClear();
+    ssoTokenStore.save.mockClear();
+    ssoTokenStore.remove.mockClear();
   });
 
   it("stays active until aborted", async () => {
@@ -334,6 +350,76 @@ describe("monitorMSTeamsProvider lifecycle", () => {
       next2,
     );
     expect(next2).toHaveBeenCalledTimes(1);
+
+    abort.abort();
+    await task;
+  });
+
+  it("keeps SDK SSO invoke routes and persists successful signin events", async () => {
+    const abort = new AbortController();
+    const cfg = createConfig(0);
+    updateMSTeamsConfig(cfg, {
+      sso: { enabled: true, connectionName: "graph" },
+    });
+
+    const task = monitorMSTeamsProvider({
+      cfg,
+      runtime: createRuntime(),
+      abortSignal: abort.signal,
+      conversationStore: createStores().conversationStore,
+      pollStore: createStores().pollStore,
+    });
+
+    await vi.waitFor(() => {
+      expect(registerMSTeamsHandlers).toHaveBeenCalled();
+    });
+
+    expect(loadMSTeamsSdkWithAuth.mock.calls[0]?.[1]).toMatchObject({
+      oauthDefaultConnectionName: "graph",
+    });
+
+    const sdkResult = await loadMSTeamsSdkWithAuth.mock.results[0]!.value;
+    const app = sdkResult.app;
+    expect(app.on).not.toHaveBeenCalledWith("signin.token-exchange", expect.any(Function));
+    expect(app.on).not.toHaveBeenCalledWith("signin.verify-state", expect.any(Function));
+    expect(app.event).toHaveBeenCalledWith("signin", expect.any(Function));
+
+    const signinHandler = app.event.mock.calls.find(([name]) => name === "signin")?.[1] as
+      | ((ctx: {
+          activity: { from?: { id?: string; aadObjectId?: string } };
+          token: { connectionName: string; token: string; expiration: string };
+        }) => void)
+      | undefined;
+    expect(signinHandler).toBeDefined();
+
+    signinHandler?.({
+      activity: { from: { id: "29:user", aadObjectId: "aad-user" } },
+      token: {
+        connectionName: "graph",
+        token: "delegated-graph-token",
+        expiration: "2030-01-01T00:00:00Z",
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(ssoTokenStore.save).toHaveBeenCalledTimes(2);
+    });
+    expect(ssoTokenStore.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionName: "graph",
+        userId: "29:user",
+        token: "delegated-graph-token",
+        expiresAt: "2030-01-01T00:00:00Z",
+      }),
+    );
+    expect(ssoTokenStore.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionName: "graph",
+        userId: "aad-user",
+        token: "delegated-graph-token",
+        expiresAt: "2030-01-01T00:00:00Z",
+      }),
+    );
 
     abort.abort();
     await task;

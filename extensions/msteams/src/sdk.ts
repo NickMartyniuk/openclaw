@@ -87,6 +87,7 @@ type SigninVerifyStateCtx = import("@microsoft/teams.apps/dist/contexts/index.js
 type MessageSubmitCtx = import("@microsoft/teams.apps/dist/contexts/index.js").IActivityContext<
   import("@microsoft/teams.api/dist/activities/invoke/message/submit-action.js").IMessageSubmitActionInvokeActivity
 >;
+type SigninEventCtx = import("@microsoft/teams.apps/dist/contexts/index.js").IActivitySignInContext;
 
 type MSTeamsAppOn = {
   // Adaptive card actions (Action.Execute Universal Action Model). Typed
@@ -102,10 +103,10 @@ type MSTeamsAppOn = {
     name: "file.consent.accept" | "file.consent.decline",
     cb: (ctx: FileConsentCtx) => void | Promise<void>,
   ): MSTeamsApp;
-  // SSO sign-in invokes. Registering these replaces the SDK's built-in
-  // system defaults: when a user route shares a name with a system route,
-  // the SDK's router removes the default. Only our handler runs; SDK
-  // wraps `void` to `{ status: 200 }`.
+  // SSO sign-in invokes. The production monitor intentionally leaves the SDK's
+  // system defaults registered so Teams gets the SDK's 200/412 response
+  // semantics. These overloads remain for route-name validation if a caller ever
+  // needs an explicit replacement route.
   (
     name: "signin.token-exchange",
     cb: (ctx: SigninTokenExchangeCtx) => void | Promise<void>,
@@ -156,6 +157,7 @@ export type MSTeamsApp = {
    */
   reply(conversationId: string, messageId: string, activity: unknown): Promise<{ id?: string }>;
   on: MSTeamsAppOn;
+  event(name: "signin", cb: (ctx: SigninEventCtx) => void | Promise<void>): MSTeamsApp;
   initialize(): Promise<void>;
   tokenManager: {
     getGraphToken(): Promise<unknown>;
@@ -250,6 +252,11 @@ export type CreateMSTeamsAppOptions = {
    * @default '/api/messages'
    */
   messagingEndpoint?: `/${string}`;
+  /**
+   * OAuth connection name used by the SDK's built-in sign-in handlers.
+   * @default 'graph'
+   */
+  oauthDefaultConnectionName?: string;
 };
 
 /**
@@ -275,6 +282,9 @@ export async function createMSTeamsApp(
     client: { headers: { "User-Agent": buildOpenClawUserAgentFragment() } },
     ...(options?.httpServerAdapter ? { httpServerAdapter: options.httpServerAdapter } : {}),
     ...(options?.messagingEndpoint ? { messagingEndpoint: options.messagingEndpoint } : {}),
+    ...(options?.oauthDefaultConnectionName
+      ? { oauth: { defaultConnectionName: options.oauthDefaultConnectionName } }
+      : {}),
   };
 
   if (creds.type === "federated") {

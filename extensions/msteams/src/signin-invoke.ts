@@ -10,16 +10,16 @@ import {
 } from "./sso.js";
 
 /**
- * Run the SSO sign-in invoke handler for `signin/tokenExchange` and
- * `signin/verifyState`.
+ * Legacy helper for explicit `signin/tokenExchange` and `signin/verifyState`
+ * route handling.
  *
- * Our typed `app.on("signin.token-exchange" | "signin.verify-state", …)`
- * registrations replace the SDK's built-in system defaults — the SDK's
- * router removes the default when a user route shares its name. Only our
- * handler runs; the SDK wraps a `void` return into `{ status: 200 }`. The
- * legacy `ctx.sendActivity({ type: "invokeResponse", … })` ack is gone —
- * on the new SDK that becomes an outbound BF activity instead of the HTTP
- * response.
+ * The production monitor now leaves the SDK's built-in sign-in routes in
+ * control so Teams receives the SDK's 200/412 InvokeResponse semantics, then
+ * persists successful tokens from the SDK `signin` event. Keep this helper for
+ * lower-level token-exchange coverage and for any future caller that truly needs
+ * to replace the SDK defaults. It must not ack by sending
+ * `ctx.sendActivity({ type: "invokeResponse", … })`; on the new SDK that would
+ * become an outbound BF activity instead of the HTTP response.
  */
 export async function runMSTeamsSigninInvokeHandler(
   context: MSTeamsTurnContext,
