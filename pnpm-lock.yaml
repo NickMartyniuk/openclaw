@@ -650,6 +650,10 @@ importers:
         version: link:../../packages/plugin-sdk
 
   extensions/duckduckgo:
+    dependencies:
+      effect:
+        specifier: 3.21.2
+        version: 3.21.2
     devDependencies:
       '@openclaw/plugin-sdk':
         specifier: workspace:*

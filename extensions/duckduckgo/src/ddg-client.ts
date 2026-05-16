@@ -1,4 +1,5 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import { Context, Effect, Layer } from "effect";
 import {
   DEFAULT_CACHE_TTL_MINUTES,
   DEFAULT_SEARCH_COUNT,
@@ -27,6 +28,43 @@ const DDG_SEARCH_CACHE = new Map<
   string,
   { value: Record<string, unknown>; insertedAt: number; expiresAt: number }
 >();
+
+type DuckDuckGoEndpointRequest = {
+  url: string;
+  timeoutSeconds: number;
+  init: RequestInit;
+  signal?: AbortSignal;
+};
+
+type DuckDuckGoSearchRuntime = {
+  cache: typeof DDG_SEARCH_CACHE;
+  now: () => number;
+  runEndpoint: <T>(
+    request: DuckDuckGoEndpointRequest,
+    run: (response: Response) => Promise<T>,
+  ) => Promise<T>;
+};
+
+const DuckDuckGoSearchRuntimeTag = Context.GenericTag<DuckDuckGoSearchRuntime>(
+  "openclaw/duckduckgo/SearchRuntime",
+);
+
+function createDefaultDuckDuckGoSearchRuntime(): DuckDuckGoSearchRuntime {
+  return {
+    cache: DDG_SEARCH_CACHE,
+    now: Date.now,
+    runEndpoint: withTrustedWebSearchEndpoint,
+  };
+}
+
+function duckDuckGoSearchRuntimeLayer(
+  runtime?: Partial<DuckDuckGoSearchRuntime>,
+): Layer.Layer<DuckDuckGoSearchRuntime> {
+  return Layer.succeed(DuckDuckGoSearchRuntimeTag, {
+    ...createDefaultDuckDuckGoSearchRuntime(),
+    ...runtime,
+  });
+}
 
 type DuckDuckGoResult = {
   title: string;
@@ -121,92 +159,116 @@ export async function runDuckDuckGoSearch(params: {
   timeoutSeconds?: number;
   cacheTtlMinutes?: number;
 }): Promise<Record<string, unknown>> {
-  const count = resolveSearchCount(params.count, DEFAULT_SEARCH_COUNT);
-  const region = params.region ?? resolveDdgRegion(params.config);
-  const safeSearch =
-    params.safeSearch === "strict" ||
-    params.safeSearch === "moderate" ||
-    params.safeSearch === "off"
-      ? params.safeSearch
-      : resolveDdgSafeSearch(params.config);
-  const timeoutSeconds = resolveTimeoutSeconds(params.timeoutSeconds, DEFAULT_TIMEOUT_SECONDS);
-  const cacheTtlMs = resolveCacheTtlMs(params.cacheTtlMinutes, DEFAULT_CACHE_TTL_MINUTES);
-  const cacheKey = normalizeCacheKey(
-    JSON.stringify({
-      provider: "duckduckgo",
-      query: params.query,
-      count,
-      region: region ?? "",
-      safeSearch,
+  return await Effect.runPromise(
+    runDuckDuckGoSearchEffect(params).pipe(Effect.provide(duckDuckGoSearchRuntimeLayer())),
+  );
+}
+
+function runDuckDuckGoSearchEffect(params: {
+  config?: OpenClawConfig;
+  query: string;
+  count?: number;
+  region?: string;
+  safeSearch?: DdgSafeSearch;
+  timeoutSeconds?: number;
+  cacheTtlMinutes?: number;
+}): Effect.Effect<Record<string, unknown>, unknown, DuckDuckGoSearchRuntime> {
+  return Effect.flatMap(DuckDuckGoSearchRuntimeTag, (runtime) =>
+    Effect.tryPromise({
+      try: async () => {
+        const count = resolveSearchCount(params.count, DEFAULT_SEARCH_COUNT);
+        const region = params.region ?? resolveDdgRegion(params.config);
+        const safeSearch =
+          params.safeSearch === "strict" ||
+          params.safeSearch === "moderate" ||
+          params.safeSearch === "off"
+            ? params.safeSearch
+            : resolveDdgSafeSearch(params.config);
+        const timeoutSeconds = resolveTimeoutSeconds(params.timeoutSeconds, DEFAULT_TIMEOUT_SECONDS);
+        const cacheTtlMs = resolveCacheTtlMs(params.cacheTtlMinutes, DEFAULT_CACHE_TTL_MINUTES);
+        const cacheKey = normalizeCacheKey(
+          JSON.stringify({
+            provider: "duckduckgo",
+            query: params.query,
+            count,
+            region: region ?? "",
+            safeSearch,
+          }),
+        );
+        const cached = readCache(runtime.cache, cacheKey);
+        if (cached) {
+          return { ...cached.value, cached: true };
+        }
+
+        const url = new URL(DDG_HTML_ENDPOINT);
+        url.searchParams.set("q", params.query);
+        if (region) {
+          url.searchParams.set("kl", region);
+        }
+        url.searchParams.set("kp", DDG_SAFE_SEARCH_PARAM[safeSearch]);
+
+        const startedAt = runtime.now();
+        const results = await runtime.runEndpoint(
+          {
+            url: url.toString(),
+            timeoutSeconds,
+            init: {
+              method: "GET",
+              headers: {
+                "User-Agent":
+                  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+              },
+            },
+          },
+          async (response) => {
+            if (!response.ok) {
+              const detail = (await readResponseText(response, { maxBytes: 64_000 })).text;
+              throw new Error(
+                `DuckDuckGo search error (${response.status}): ${detail || response.statusText}`,
+              );
+            }
+
+            const html = await response.text();
+            if (isBotChallenge(html)) {
+              throw new Error("DuckDuckGo returned a bot-detection challenge.");
+            }
+            return parseDuckDuckGoHtml(html).slice(0, count);
+          },
+        );
+
+        const payload = {
+          query: params.query,
+          provider: "duckduckgo",
+          count: results.length,
+          tookMs: runtime.now() - startedAt,
+          externalContent: {
+            untrusted: true,
+            source: "web_search",
+            provider: "duckduckgo",
+            wrapped: true,
+          },
+          results: results.map((result) => ({
+            title: wrapWebContent(result.title, "web_search"),
+            url: result.url,
+            snippet: result.snippet ? wrapWebContent(result.snippet, "web_search") : "",
+            siteName: resolveSiteName(result.url) || undefined,
+          })),
+        } satisfies Record<string, unknown>;
+
+        writeCache(runtime.cache, cacheKey, payload, cacheTtlMs);
+        return payload;
+      },
+      catch: (error) => error,
     }),
   );
-  const cached = readCache(DDG_SEARCH_CACHE, cacheKey);
-  if (cached) {
-    return { ...cached.value, cached: true };
-  }
-
-  const url = new URL(DDG_HTML_ENDPOINT);
-  url.searchParams.set("q", params.query);
-  if (region) {
-    url.searchParams.set("kl", region);
-  }
-  url.searchParams.set("kp", DDG_SAFE_SEARCH_PARAM[safeSearch]);
-
-  const startedAt = Date.now();
-  const results = await withTrustedWebSearchEndpoint(
-    {
-      url: url.toString(),
-      timeoutSeconds,
-      init: {
-        method: "GET",
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        },
-      },
-    },
-    async (response) => {
-      if (!response.ok) {
-        const detail = (await readResponseText(response, { maxBytes: 64_000 })).text;
-        throw new Error(
-          `DuckDuckGo search error (${response.status}): ${detail || response.statusText}`,
-        );
-      }
-
-      const html = await response.text();
-      if (isBotChallenge(html)) {
-        throw new Error("DuckDuckGo returned a bot-detection challenge.");
-      }
-      return parseDuckDuckGoHtml(html).slice(0, count);
-    },
-  );
-
-  const payload = {
-    query: params.query,
-    provider: "duckduckgo",
-    count: results.length,
-    tookMs: Date.now() - startedAt,
-    externalContent: {
-      untrusted: true,
-      source: "web_search",
-      provider: "duckduckgo",
-      wrapped: true,
-    },
-    results: results.map((result) => ({
-      title: wrapWebContent(result.title, "web_search"),
-      url: result.url,
-      snippet: result.snippet ? wrapWebContent(result.snippet, "web_search") : "",
-      siteName: resolveSiteName(result.url) || undefined,
-    })),
-  } satisfies Record<string, unknown>;
-
-  writeCache(DDG_SEARCH_CACHE, cacheKey, payload, cacheTtlMs);
-  return payload;
 }
 
 export const __testing = {
+  DDG_SEARCH_CACHE,
   decodeDuckDuckGoUrl,
   decodeHtmlEntities,
+  duckDuckGoSearchRuntimeLayer,
   isBotChallenge,
   parseDuckDuckGoHtml,
+  runDuckDuckGoSearchEffect,
 };

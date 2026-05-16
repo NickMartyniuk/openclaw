@@ -4,6 +4,9 @@
   "private": true,
   "description": "OpenClaw DuckDuckGo plugin",
   "type": "module",
+  "dependencies": {
+    "effect": "3.21.2"
+  },
   "devDependencies": {
     "@openclaw/plugin-sdk": "workspace:*"
   },
