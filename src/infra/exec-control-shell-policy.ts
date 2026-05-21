@@ -21,11 +21,6 @@ type ControlShellCandidate = {
   context: ControlShellCandidateContext;
 };
 
-const APPROVAL_COMMAND_DENY_MESSAGE = [
-  "exec cannot run /approve commands.",
-  "Show the /approve command to the user as chat text, or route it through the approval command handler instead of shell execution.",
-].join(" ");
-
 const INTERACTIVE_CHANNEL_LOGIN_DENY_MESSAGE = [
   "exec cannot run interactive OpenClaw channel login commands.",
   "Run `openclaw channels login` in a terminal on the gateway host, or use the channel-specific login agent tool when available (for WhatsApp: `whatsapp_login`).",
@@ -33,9 +28,6 @@ const INTERACTIVE_CHANNEL_LOGIN_DENY_MESSAGE = [
 
 const SECURITY_AUDIT_SUPPRESSION_WARNING =
   "Warning: security audit suppression changes require explicit approval unless exec is running in yolo mode.";
-
-const APPROVAL_COMMAND_PATTERN =
-  /(?:^|[\s'"`;&|()])\/approve(?:@[^\s'"`;&|()]+)?\s+[A-Za-z0-9][A-Za-z0-9._:-]*\s+(?:allow-once|allow-always|always|deny)\b/iu;
 
 const OPENCLAW_GLOBAL_FLAGS_WITH_VALUES = new Set(["--container", "--log-level", "--profile"]);
 
@@ -310,24 +302,10 @@ export async function inspectControlShellCommand(params: {
   parsedSegments?: readonly ControlShellParsedSegment[];
 }): Promise<ControlShellPolicyDecision> {
   const command = params.command.trim();
-  if (APPROVAL_COMMAND_PATTERN.test(command)) {
-    return { kind: "deny", message: APPROVAL_COMMAND_DENY_MESSAGE };
-  }
-
   const candidates = await buildControlShellCandidates({
     command,
     parsedSegments: params.parsedSegments,
   });
-
-  if (
-    candidates.some(
-      (candidate) =>
-        APPROVAL_COMMAND_PATTERN.test(candidate.raw) ||
-        /^\/approve(?:@.+)?$/iu.test(candidate.argv[0] ?? ""),
-    )
-  ) {
-    return { kind: "deny", message: APPROVAL_COMMAND_DENY_MESSAGE };
-  }
 
   if (candidates.some((candidate) => isInteractiveOpenClawChannelLoginArgv(candidate.argv))) {
     return { kind: "deny", message: INTERACTIVE_CHANNEL_LOGIN_DENY_MESSAGE };

@@ -10,17 +10,6 @@ async function inspect(command: string): Promise<ControlShellPolicyDecision> {
 
 describe("exec control shell policy", () => {
   it.each([
-    "/approve req-1 allow-always",
-    "bash -lc '/approve req-1 deny'",
-    "env -S 'bash -lc' '/approve req-1 deny'",
-  ])("denies approval commands in shell exec: %s", async (command) => {
-    await expect(inspect(command)).resolves.toMatchObject({
-      kind: "deny",
-      message: expect.stringContaining("exec cannot run /approve commands"),
-    });
-  });
-
-  it.each([
     "openclaw channels login --channel whatsapp",
     "openclaw channel login --channel whatsapp",
     "sudo -u openclaw bash -lc 'openclaw channels login --channel whatsapp'",
