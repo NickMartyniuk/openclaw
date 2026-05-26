@@ -55,6 +55,31 @@ function runEnsureNode(root: string, requested: string, extraEnv: NodeJS.Process
   return result;
 }
 
+function runPrependNodeBin(root: string, rawPath: string, extraPath: string) {
+  const githubPath = join(root, "github-path");
+  return spawnSync(
+    "bash",
+    [
+      "-c",
+      [
+        "set -e",
+        `export PATH=${JSON.stringify(extraPath)}`,
+        `source "${ensureNodeScript}"`,
+        `openclaw_prepend_node_bin ${JSON.stringify(rawPath)}`,
+        "printf '%s\\n' \"$PATH\"",
+        `printf 'GITHUB_PATH=%s\\n' "$(cat ${JSON.stringify(githubPath)})"`,
+      ].join("; "),
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_PATH: githubPath,
+      },
+    },
+  );
+}
+
 describe("setup-pnpm-store-cache ensure-node", () => {
   it("uses a matching active node", () => {
     const root = mkdtempSync(join(tmpdir(), "openclaw-ensure-node-"));
@@ -89,6 +114,38 @@ describe("setup-pnpm-store-cache ensure-node", () => {
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(`Using Node 24.15.0 from ${toolcacheNode}`);
       expect(result.stdout).toContain(`${toolcacheNode}\n24.15.0`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("normalizes Windows toolcache paths before prepending them in Git Bash", () => {
+    const root = mkdtempSync(join(tmpdir(), "openclaw-ensure-node-"));
+    try {
+      const fakeBin = join(root, "fake-bin");
+      mkdirSync(fakeBin, { recursive: true });
+      const cygpath = join(fakeBin, "cygpath");
+      writeFileSync(
+        cygpath,
+        `#!/usr/bin/env bash
+if [[ "$1" == "-u" && "$2" == "C:\\\\hostedtoolcache\\\\windows\\\\node\\\\24.15.0\\\\x64" ]]; then
+  echo "/c/hostedtoolcache/windows/node/24.15.0/x64"
+  exit 0
+fi
+exit 1
+`,
+      );
+      chmodSync(cygpath, 0o755);
+
+      const result = runPrependNodeBin(
+        root,
+        "C:\\hostedtoolcache\\windows\\node\\24.15.0\\x64",
+        `${fakeBin}:${process.env.PATH ?? ""}`,
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("/c/hostedtoolcache/windows/node/24.15.0/x64:");
+      expect(result.stdout).toContain("GITHUB_PATH=/c/hostedtoolcache/windows/node/24.15.0/x64");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

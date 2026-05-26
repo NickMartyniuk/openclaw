@@ -26,8 +26,18 @@ openclaw_active_node_version() {
   node -p 'process.versions.node' 2>/dev/null || true
 }
 
+openclaw_normalize_path_for_bash() {
+  local input_path="$1"
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -u "$input_path" 2>/dev/null || printf '%s\n' "$input_path"
+    return 0
+  fi
+  printf '%s\n' "$input_path"
+}
+
 openclaw_prepend_node_bin() {
   local node_bin_dir="$1"
+  node_bin_dir="$(openclaw_normalize_path_for_bash "$node_bin_dir")"
   export PATH="$node_bin_dir:$PATH"
   if [[ -n "${GITHUB_PATH:-}" ]]; then
     echo "$node_bin_dir" >> "$GITHUB_PATH"
