@@ -3573,6 +3573,13 @@ export async function runEmbeddedAttempt(
         }
         abortCompaction();
         void abortActiveSession();
+        if (isTimeout) {
+          void sessionLockController.releaseHeldLockForAbort().catch((err) => {
+            log.warn(
+              `failed to release session lock on timeout abort: runId=${params.runId} ${String(err)}`,
+            );
+          });
+        }
       };
       abortRunForExternalSignal = abortRun;
       idleTimeoutTrigger = (error) => {
