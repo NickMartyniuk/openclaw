@@ -954,7 +954,7 @@ describe("buildGuardedModelFetch", () => {
       expect(response.headers.get("x-should-retry")).toBe("false");
     });
 
-    it("ignores partial retry-after numeric headers", async () => {
+    it("matches SDK partial retry-after numeric header parsing", async () => {
       fetchWithSsrFGuardMock.mockResolvedValue({
         response: new Response(null, {
           status: 503,
@@ -968,7 +968,7 @@ describe("buildGuardedModelFetch", () => {
         { method: "POST" },
       );
 
-      expect(response.headers.get("x-should-retry")).toBeNull();
+      expect(response.headers.get("x-should-retry")).toBe("false");
     });
 
     it("falls back to retry-after when retry-after-ms is blank", async () => {
