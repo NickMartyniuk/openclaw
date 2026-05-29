@@ -1736,6 +1736,7 @@ export abstract class MemoryManagerSyncOps {
           } else {
             this.sessionsDirty = false;
           }
+          this.dirty = false;
 
           const meta: MemoryIndexMeta = {
             model: this.provider?.model ?? "fts-only",
@@ -1816,6 +1817,7 @@ export abstract class MemoryManagerSyncOps {
     } else {
       this.sessionsDirty = false;
     }
+    this.dirty = false;
 
     const nextMeta: MemoryIndexMeta = {
       model: this.provider?.model ?? "fts-only",
