@@ -4,6 +4,14 @@ import { MAX_SAFE_TIMEOUT_DELAY_MS } from "../utils/timer-delay.js";
 type StrictInlineEvalBoundary =
   typeof import("./bash-tools.exec-host-shared.js").enforceStrictInlineEvalApprovalBoundary;
 type ExecAutoReviewer = typeof import("../infra/exec-auto-review.js").defaultExecAutoReviewer;
+type ExecApprovalsDefaults = import("../infra/exec-approvals.js").ExecApprovalsDefaults;
+type ExecApprovalsFile = import("../infra/exec-approvals.js").ExecApprovalsFile;
+type ExecAllowlistEntry = import("../infra/exec-approvals.js").ExecAllowlistEntry;
+type MockExecApprovalsResolved = {
+  allowlist: ExecAllowlistEntry[];
+  file: ExecApprovalsFile;
+  agent: Required<ExecApprovalsDefaults>;
+};
 type MockAllowlistSegment = {
   raw?: string;
   resolution: null;
@@ -54,16 +62,18 @@ const evaluateShellAllowlistMock = vi.hoisted(() =>
   ),
 );
 const resolveExecApprovalsFromFileMock = vi.hoisted(() =>
-  vi.fn(() => ({
-    allowlist: [],
-    file: { version: 1, agents: {} },
-    agent: {
-      security: "full",
-      ask: "off",
-      askFallback: "deny",
-      autoAllowSkills: false,
-    },
-  })),
+  vi.fn(
+    (): MockExecApprovalsResolved => ({
+      allowlist: [],
+      file: { version: 1, agents: {} },
+      agent: {
+        security: "full",
+        ask: "off",
+        askFallback: "deny",
+        autoAllowSkills: false,
+      },
+    }),
+  ),
 );
 const requiresExecApprovalMock = vi.hoisted(() => vi.fn(() => true));
 const hasDurableExecApprovalMock = vi.hoisted(() => vi.fn(() => false));
