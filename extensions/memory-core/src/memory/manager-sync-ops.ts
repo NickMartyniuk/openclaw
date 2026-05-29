@@ -52,8 +52,9 @@ import {
 import {
   resolveConfiguredScopeHash,
   resolveConfiguredSourcesForMeta,
-  shouldRunFullMemoryReindex,
+  resolveMemoryIndexIdentityState,
   type MemoryIndexMeta,
+  type MemoryIndexIdentityState,
 } from "./manager-reindex-state.js";
 import { shouldSyncSessionsForReindex } from "./manager-session-reindex.js";
 import {
@@ -260,6 +261,42 @@ export abstract class MemoryManagerSyncOps {
     entry: MemoryIndexEntry,
     options: { source: MemorySource; content?: string },
   ): Promise<void>;
+
+  protected resolveCurrentIndexIdentityState(params?: {
+    meta?: MemoryIndexMeta | null;
+    provider?: { id: string; model: string } | null;
+    providerKeyKnown?: boolean;
+    vectorReady?: boolean;
+  }): MemoryIndexIdentityState {
+    const hasProviderOverride = params && "provider" in params;
+    const provider = hasProviderOverride
+      ? params.provider!
+      : this.provider
+        ? { id: this.provider.id, model: this.provider.model }
+        : this.settings.provider === "none"
+          ? null
+          : { id: this.settings.provider, model: this.settings.model };
+    return resolveMemoryIndexIdentityState({
+      meta: params && "meta" in params ? params.meta! : this.readMeta(),
+      provider,
+      providerKey: params?.providerKeyKnown === false ? undefined : (this.providerKey ?? undefined),
+      providerKeyKnown: params?.providerKeyKnown,
+      configuredSources: resolveConfiguredSourcesForMeta(this.sources),
+      configuredScopeHash: resolveConfiguredScopeHash({
+        workspaceDir: this.workspaceDir,
+        extraPaths: this.settings.extraPaths,
+        multimodal: {
+          enabled: this.settings.multimodal.enabled,
+          modalities: this.settings.multimodal.modalities,
+          maxFileBytes: this.settings.multimodal.maxFileBytes,
+        },
+      }),
+      chunkTokens: this.settings.chunking.tokens,
+      chunkOverlap: this.settings.chunking.overlap,
+      vectorReady: Boolean(params?.vectorReady),
+      ftsTokenizer: this.settings.store.fts.tokenizer,
+    });
+  }
 
   protected resetVectorState(): void {
     this.vectorReady = null;
@@ -1423,16 +1460,6 @@ export abstract class MemoryManagerSyncOps {
     }
     const vectorReady = await this.ensureVectorReady();
     const meta = this.readMeta();
-    const configuredSources = resolveConfiguredSourcesForMeta(this.sources);
-    const configuredScopeHash = resolveConfiguredScopeHash({
-      workspaceDir: this.workspaceDir,
-      extraPaths: this.settings.extraPaths,
-      multimodal: {
-        enabled: this.settings.multimodal.enabled,
-        modalities: this.settings.multimodal.modalities,
-        maxFileBytes: this.settings.multimodal.maxFileBytes,
-      },
-    });
     const targetSessionFiles = this.normalizeTargetSessionFiles(params?.sessionFiles);
     const hasTargetSessionFiles = targetSessionFiles !== null;
     if (params?.reason === "cli" && !params.force && !hasTargetSessionFiles) {
@@ -1463,20 +1490,28 @@ export abstract class MemoryManagerSyncOps {
       this.sessionsDirty = targetedSessionSync.sessionsDirty;
       return;
     }
+    const indexIdentity = resolveMemoryIndexIdentityState({
+      meta,
+      // Also detects provider→FTS-only transitions so orphaned old-model FTS rows are cleaned up.
+      provider: this.provider ? { id: this.provider.id, model: this.provider.model } : null,
+      providerKey: this.providerKey ?? undefined,
+      configuredSources: resolveConfiguredSourcesForMeta(this.sources),
+      configuredScopeHash: resolveConfiguredScopeHash({
+        workspaceDir: this.workspaceDir,
+        extraPaths: this.settings.extraPaths,
+        multimodal: {
+          enabled: this.settings.multimodal.enabled,
+          modalities: this.settings.multimodal.modalities,
+          maxFileBytes: this.settings.multimodal.maxFileBytes,
+        },
+      }),
+      chunkTokens: this.settings.chunking.tokens,
+      chunkOverlap: this.settings.chunking.overlap,
+      vectorReady,
+      ftsTokenizer: this.settings.store.fts.tokenizer,
+    });
     const needsFullReindex =
-      (params?.force && !hasTargetSessionFiles) ||
-      shouldRunFullMemoryReindex({
-        meta,
-        // Also detects provider→FTS-only transitions so orphaned old-model FTS rows are cleaned up.
-        provider: this.provider ? { id: this.provider.id, model: this.provider.model } : null,
-        providerKey: this.providerKey ?? undefined,
-        configuredSources,
-        configuredScopeHash,
-        chunkTokens: this.settings.chunking.tokens,
-        chunkOverlap: this.settings.chunking.overlap,
-        vectorReady,
-        ftsTokenizer: this.settings.store.fts.tokenizer,
-      });
+      (params?.force && !hasTargetSessionFiles) || indexIdentity.status !== "valid";
     try {
       if (needsFullReindex) {
         if (
