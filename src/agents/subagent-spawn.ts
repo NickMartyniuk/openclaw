@@ -108,6 +108,7 @@ function resolveConfiguredAgentIds(cfg: OpenClawConfig): string[] {
 
 type SubagentSpawnDeps = {
   callGateway: typeof callGateway;
+  createRunId: () => string;
   forkSessionFromParent: typeof forkSessionFromParent;
   getGlobalHookRunner: () => SubagentLifecycleHookRunner | null;
   getRuntimeConfig: typeof getRuntimeConfig;
@@ -119,6 +120,7 @@ type SubagentSpawnDeps = {
 
 const defaultSubagentSpawnDeps: SubagentSpawnDeps = {
   callGateway,
+  createRunId: () => crypto.randomUUID(),
   forkSessionFromParent,
   getGlobalHookRunner,
   getRuntimeConfig,
@@ -1174,7 +1176,7 @@ export async function spawnSubagentDirect(
 
   // Gateway agent runs use the idempotency key as runId. Register before the
   // child RPC so first-turn hangs are covered by the registry timeout deadline.
-  const childIdem = crypto.randomUUID();
+  const childIdem = subagentSpawnDeps.createRunId();
   let childRunId: string = childIdem;
   const deliverInitialChildRunDirectly =
     requestThreadBinding && spawnMode === "session" && hasBoundThreadDeliveryOrigin;

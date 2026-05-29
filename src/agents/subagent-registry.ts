@@ -16,6 +16,7 @@ import { isAbortedAgentStopReason } from "./run-termination.js";
 import {
   isHardAgentRunTimeoutPhase,
   normalizeAgentRunTimeoutPhase,
+  normalizeProviderStarted,
 } from "./run-timeout-attribution.js";
 import type { ensureRuntimePluginsLoaded as ensureRuntimePluginsLoadedFn } from "./runtime-plugins.js";
 import type { SubagentRunOutcome } from "./subagent-announce-output.js";
@@ -43,7 +44,6 @@ import {
   reconcileOrphanedRestoredRuns,
   reconcileOrphanedRun,
   resolveAnnounceRetryDelayMs,
-  resolveSubagentRunTimeoutAt,
   resolveSubagentRunOrphanReason,
   safeRemoveAttachmentsDir,
 } from "./subagent-registry-helpers.js";
@@ -318,6 +318,16 @@ const pendingLifecycleTimeoutByRunId = new Map<
     dueAt: number;
     reconcileBeforeTimeout: boolean;
     authoritative: boolean;
+    timeoutPhase?: ReturnType<typeof normalizeAgentRunTimeoutPhase>;
+    providerStarted?: boolean;
+  }
+>();
+const authoritativeLifecycleTimeoutByRunId = new Map<
+  string,
+  {
+    endedAt: number;
+    timeoutPhase: NonNullable<ReturnType<typeof normalizeAgentRunTimeoutPhase>>;
+    providerStarted?: boolean;
   }
 >();
 
@@ -342,7 +352,7 @@ function clearPendingLifecycleTimeout(runId: string, opts?: { preserveAuthoritat
   if (!pending) {
     return;
   }
-  if (opts?.preserveAuthoritative === true && pending.authoritative === true) {
+  if (opts?.preserveAuthoritative === true && pending.authoritative) {
     return;
   }
   clearTimeout(pending.timer);
@@ -364,6 +374,14 @@ function getPendingLifecycleTimeout(runId: string) {
         authoritative: pending.authoritative,
       }
     : undefined;
+}
+
+function getAuthoritativeLifecycleTimeout(runId: string) {
+  return authoritativeLifecycleTimeoutByRunId.get(runId);
+}
+
+function clearAuthoritativeLifecycleTimeout(runId: string) {
+  authoritativeLifecycleTimeoutByRunId.delete(runId);
 }
 
 type CompleteSubagentRunParams = {
@@ -437,7 +455,7 @@ function schedulePendingLifecycleError(params: {
   startedAt?: number;
   error?: string;
 }) {
-  clearPendingLifecycleTimeout(params.runId);
+  clearPendingLifecycleTimeout(params.runId, { preserveAuthoritative: true });
   clearPendingLifecycleError(params.runId);
   const timer = setTimeout(() => {
     const pending = pendingLifecycleErrorByRunId.get(params.runId);
@@ -483,6 +501,8 @@ function schedulePendingLifecycleTimeout(params: {
   delayMs?: number;
   reconcileBeforeTimeout?: boolean;
   authoritative?: boolean;
+  timeoutPhase?: ReturnType<typeof normalizeAgentRunTimeoutPhase>;
+  providerStarted?: boolean;
 }) {
   clearPendingLifecycleError(params.runId);
   const delayMs =
@@ -522,7 +542,7 @@ function schedulePendingLifecycleTimeout(params: {
     if (!entry) {
       return;
     }
-    if (entry.pauseReason === "sessions_yield" && pending.authoritative !== true) {
+    if (entry.pauseReason === "sessions_yield" && !pending.authoritative) {
       return;
     }
     if (entry.outcome?.status === "ok") {
@@ -555,6 +575,10 @@ function schedulePendingLifecycleTimeout(params: {
       endedAt: pending.endedAt,
       outcome: {
         status: "timeout" as const,
+        ...(pending.timeoutPhase ? { timeoutPhase: pending.timeoutPhase } : {}),
+        ...(pending.providerStarted !== undefined
+          ? { providerStarted: pending.providerStarted }
+          : {}),
       },
       reason: SUBAGENT_ENDED_REASON_COMPLETE,
       sendFarewell: true,
@@ -572,7 +596,16 @@ function schedulePendingLifecycleTimeout(params: {
     dueAt,
     reconcileBeforeTimeout,
     authoritative,
+    timeoutPhase: params.timeoutPhase,
+    providerStarted: params.providerStarted,
   });
+  if (authoritative && params.timeoutPhase) {
+    authoritativeLifecycleTimeoutByRunId.set(params.runId, {
+      endedAt,
+      timeoutPhase: params.timeoutPhase,
+      providerStarted: params.providerStarted,
+    });
+  }
 }
 
 function scheduleRunTimeoutFallback(entry: SubagentRunRecord, startedAt: number) {
@@ -597,6 +630,27 @@ function scheduleRunTimeoutFallback(entry: SubagentRunRecord, startedAt: number)
     authoritative: true,
     startedAt,
   });
+}
+
+function resolveSubagentRunTimeoutAtWithObservedStart(
+  entry: SubagentRunRecord,
+  observedStartedAt?: number,
+) {
+  const runTimeoutSeconds = entry.runTimeoutSeconds;
+  if (
+    typeof runTimeoutSeconds !== "number" ||
+    !Number.isFinite(runTimeoutSeconds) ||
+    runTimeoutSeconds <= 0
+  ) {
+    return undefined;
+  }
+  const startedAt =
+    typeof observedStartedAt === "number" && Number.isFinite(observedStartedAt)
+      ? observedStartedAt
+      : (entry.startedAt ?? entry.createdAt);
+  return Number.isFinite(startedAt)
+    ? Math.floor(startedAt) + Math.floor(runTimeoutSeconds * 1000)
+    : undefined;
 }
 
 async function notifyContextEngineSubagentEnded(params: {
@@ -684,6 +738,8 @@ const subagentLifecycleController = createSubagentRegistryLifecycleController({
   clearPendingLifecycleError,
   clearPendingLifecycleTimeout,
   getPendingLifecycleTimeout,
+  getAuthoritativeLifecycleTimeout,
+  clearAuthoritativeLifecycleTimeout,
   countPendingDescendantRuns,
   suppressAnnounceForSteerRestart,
   shouldEmitEndedHookForRun,
@@ -1214,23 +1270,33 @@ function ensureListener() {
       const livenessState =
         typeof evt.data?.livenessState === "string" ? evt.data.livenessState : undefined;
       const stopReason = typeof evt.data?.stopReason === "string" ? evt.data.stopReason : undefined;
-      const timeoutPhase = normalizeAgentRunTimeoutPhase(evt.data?.timeoutPhase);
-      const explicitRunTimeoutAt = resolveSubagentRunTimeoutAt(entry);
+      const timeoutPhase =
+        normalizeAgentRunTimeoutPhase(evt.data?.timeoutPhase) ??
+        (evt.data?.aborted === true && /\btimed?\s*out\b|timeout/i.test(error ?? "")
+          ? "provider"
+          : undefined);
+      const explicitRunTimeoutAt = resolveSubagentRunTimeoutAtWithObservedStart(entry, startedAt);
       const explicitRunTimeoutElapsed =
         typeof explicitRunTimeoutAt === "number" && endedAt >= explicitRunTimeoutAt;
       if (isHardAgentRunTimeoutPhase(timeoutPhase)) {
+        const timeoutEndedAt = explicitRunTimeoutElapsed ? explicitRunTimeoutAt : endedAt;
+        const providerStarted = normalizeProviderStarted(evt.data?.providerStarted);
         schedulePendingLifecycleTimeout({
           runId: evt.runId,
-          endedAt: explicitRunTimeoutElapsed ? explicitRunTimeoutAt : endedAt,
+          endedAt: timeoutEndedAt,
+          startedAt,
           delayMs: 0,
           reconcileBeforeTimeout: true,
           authoritative: true,
+          timeoutPhase,
+          providerStarted,
         });
         return;
       }
       if (
         explicitRunTimeoutElapsed &&
-        (phase === "error" ||
+        (phase === "end" ||
+          phase === "error" ||
           evt.data?.aborted === true ||
           isBlockedLivenessState(livenessState) ||
           isAbortedAgentStopReason(stopReason))
@@ -1247,6 +1313,18 @@ function ensureListener() {
       const pendingTimeout = pendingLifecycleTimeoutByRunId.get(evt.runId);
       if (
         pendingTimeout?.authoritative === true &&
+        phase === "end" &&
+        !explicitRunTimeoutElapsed &&
+        typeof startedAt === "number" &&
+        typeof explicitRunTimeoutAt === "number" &&
+        startedAt < pendingTimeout.endedAt &&
+        explicitRunTimeoutAt > pendingTimeout.endedAt
+      ) {
+        clearPendingLifecycleTimeout(evt.runId);
+      }
+      if (
+        pendingTimeout?.authoritative === true &&
+        pendingLifecycleTimeoutByRunId.has(evt.runId) &&
         (typeof endedAt !== "number" || endedAt > pendingTimeout.endedAt)
       ) {
         return;
@@ -1420,6 +1498,7 @@ export function resetSubagentRegistryForTests(opts?: { persist?: boolean }) {
   endedHookInFlightRunIds.clear();
   clearAllPendingLifecycleErrors();
   clearAllPendingLifecycleTimeouts();
+  authoritativeLifecycleTimeoutByRunId.clear();
   contextEngineInitLoader.clear();
   contextEngineRegistryLoader.clear();
   runtimePluginsLoader.clear();

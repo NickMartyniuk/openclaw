@@ -70,6 +70,8 @@ type AgentWaitResult = {
 export type SubagentRunOutcome = {
   status: "ok" | "error" | "timeout" | "unknown";
   error?: string;
+  timeoutPhase?: AgentRunTimeoutPhase;
+  providerStarted?: boolean;
   startedAt?: number;
   endedAt?: number;
   elapsedMs?: number;

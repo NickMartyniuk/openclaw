@@ -611,7 +611,7 @@ describe("subagent registry seam flow", () => {
       );
     });
     expect(mocks.runSubagentAnnounceFlow).toHaveBeenCalledTimes(1);
-    expect(mocks.captureSubagentCompletionReply).toHaveBeenCalledTimes(1);
+    expect(mocks.captureSubagentCompletionReply).not.toHaveBeenCalled();
   });
 
   it("converts first lifecycle success after the explicit run deadline into timeout", async () => {
@@ -3955,7 +3955,7 @@ describe("subagent registry seam flow", () => {
     expect(mocks.runSubagentAnnounceFlow).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps hard timeout lifecycle ends authoritative over later successful lifecycle ends", async () => {
+  it("keeps hard timeout lifecycle events authoritative over later successful lifecycle ends", async () => {
     mocks.callGateway.mockImplementation(async (request: { method?: string }) => {
       if (request.method === "agent.wait") {
         return { status: "pending" };
@@ -4029,7 +4029,7 @@ describe("subagent registry seam flow", () => {
         endedAt: 20,
         elapsedMs: 10,
       },
-      "late ok timeout announce outcome",
+      "late ok timeout outcome",
     );
 
     const run = mod
@@ -4095,7 +4095,7 @@ describe("subagent registry seam flow", () => {
     });
   });
 
-  it("keeps hard timeout lifecycle ends authoritative over later lifecycle errors", async () => {
+  it("keeps hard timeout lifecycle events authoritative over later lifecycle errors", async () => {
     mocks.callGateway.mockImplementation(async (request: { method?: string }) => {
       if (request.method === "agent.wait") {
         return { status: "pending" };
@@ -4158,9 +4158,11 @@ describe("subagent registry seam flow", () => {
       announceParams.outcome,
       {
         status: "timeout",
+        startedAt: 10,
         endedAt: 20,
+        elapsedMs: 10,
       },
-      "late error timeout announce outcome",
+      "late error timeout outcome",
     );
 
     const run = mod

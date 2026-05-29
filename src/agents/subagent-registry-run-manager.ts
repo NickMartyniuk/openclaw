@@ -387,6 +387,8 @@ export function createSubagentRunManager(params: {
       };
       if (waitStatus === "timeout") {
         const now = Date.now();
+        const hardTimeoutObservedAt =
+          hardRunTimeout && typeof wait.endedAt !== "number" ? waitStartedAt : wait.endedAt;
         if (observedStartedAt !== undefined && entry.startedAt !== observedStartedAt) {
           entry.startedAt = observedStartedAt;
           if (typeof entry.sessionStartedAt !== "number") {
@@ -397,11 +399,12 @@ export function createSubagentRunManager(params: {
         // A plain agent.wait timeout has no terminal snapshot. For explicit
         // subagent run timeouts, the stored run deadline is the completion
         // contract so parent sessions are woken instead of retrying forever.
-        const hardRunTimeoutEndedAt = resolveHardRunTimeoutEndedAt(entry, now, observedStartedAt);
         const explicitRunTimeoutAt = resolveSubagentRunDeadlineMs(entry, observedStartedAt);
         const explicitRunTimeoutElapsed =
           typeof explicitRunTimeoutAt === "number" &&
-          now + WAIT_TIMEOUT_DEADLINE_SKEW_MS >= explicitRunTimeoutAt;
+          (hardTimeoutObservedAt ?? now) + WAIT_TIMEOUT_DEADLINE_SKEW_MS >= explicitRunTimeoutAt;
+        const hardRunTimeoutEndedAt =
+          hardTimeoutObservedAt ?? resolveHardRunTimeoutEndedAt(entry, now, observedStartedAt);
         const isTerminalWaitTimeout =
           typeof wait.endedAt === "number" ||
           typeof wait.stopReason === "string" ||
@@ -497,16 +500,24 @@ export function createSubagentRunManager(params: {
           : rawWaitError;
       const baseOutcome: SubagentRunOutcome =
         waitStatus === "error" ? { status: "error", error: waitError } : { status: "ok" };
-      const pendingTimeout = params.getPendingLifecycleTimeout(runId);
-      if (
-        pendingTimeout?.authoritative === true &&
-        baseOutcome.status !== "timeout" &&
-        (typeof wait.endedAt !== "number" || wait.endedAt > pendingTimeout.endedAt)
-      ) {
-        return;
-      }
       const resolvedEndedAt =
         typeof wait.endedAt === "number" ? wait.endedAt : (entry.endedAt ?? Date.now());
+      const pendingTimeout = params.getPendingLifecycleTimeout(runId);
+      if (pendingTimeout?.authoritative === true && baseOutcome.status !== "timeout") {
+        if (typeof wait.endedAt !== "number" && typeof entry.endedAt !== "number") {
+          return;
+        }
+        const observedDeadline = resolveSubagentRunDeadlineMs(entry, observedStartedAt);
+        if (
+          typeof observedDeadline === "number" &&
+          (typeof observedStartedAt !== "number" || observedStartedAt < pendingTimeout.endedAt) &&
+          resolvedEndedAt <= observedDeadline
+        ) {
+          params.clearPendingLifecycleTimeout(runId);
+        } else if (resolvedEndedAt > pendingTimeout.endedAt) {
+          return;
+        }
+      }
       let mutated = false;
       if (typeof observedStartedAt === "number") {
         entry.startedAt = observedStartedAt;

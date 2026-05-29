@@ -194,6 +194,7 @@ export async function getSessionsSpawnTool(opts: CreateOpenClawToolsOpts) {
   }
   cachedSubagentSpawnTesting.setDepsForTest({
     callGateway: (optsUnknown) => hoisted.callGatewayMock(optsUnknown),
+    createRunId: hoisted.nextRunId,
     getGlobalHookRunner: () => hoisted.state.hookRunnerOverride,
     getRuntimeConfig: () => hoisted.state.configOverride,
     resolveContextEngine: async () => ({
@@ -270,8 +271,13 @@ export function setupSessionsSpawnGatewayMock(setupOpts: SessionsSpawnGatewayMoc
     }
 
     if (request.method === "agent") {
-      const runId = hoisted.nextRunId();
-      const params = request.params as { lane?: string; sessionKey?: string } | undefined;
+      const params = request.params as
+        | { idempotencyKey?: string; lane?: string; sessionKey?: string }
+        | undefined;
+      const runId =
+        typeof params?.idempotencyKey === "string" && params.idempotencyKey.trim()
+          ? params.idempotencyKey
+          : hoisted.nextRunId();
       // Capture only the subagent run metadata.
       if (params?.lane === "subagent") {
         childRunId = runId;

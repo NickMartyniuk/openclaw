@@ -682,7 +682,23 @@ type FallbackRunnerParams = {
 
 type ModelSwitchOptions = ConstructorParameters<typeof LiveSessionModelSwitchError>[0];
 
-function makeSuccessResult(provider: string, model: string) {
+type TestSuccessMeta = {
+  durationMs: number;
+  aborted: boolean;
+  stopReason: string;
+  agentMeta: { provider: string; model: string };
+  livenessState?: string;
+  timeoutPhase?: string;
+  providerStarted?: boolean;
+};
+
+function makeSuccessResult(
+  provider: string,
+  model: string,
+): {
+  payloads: Array<{ text: string }>;
+  meta: TestSuccessMeta;
+} {
   return {
     payloads: [{ text: "ok" }],
     meta: {

@@ -644,11 +644,7 @@ function isGatewayAgentAbortRejection(error: unknown, signal: AbortSignal): bool
 }
 
 function isGatewayAgentTimeoutRejection(error: unknown, signal: AbortSignal): boolean {
-  return (
-    isGatewayAgentAbortRejection(error, signal) ||
-    isTimeoutError(error) ||
-    isCommandLaneTaskTimeoutError(error)
-  );
+  return isGatewayAgentAbortRejection(error, signal) || isCommandLaneTaskTimeoutError(error);
 }
 
 function resolveGatewayAgentAbortStopReason(signal: AbortSignal): "rpc" | "timeout" {

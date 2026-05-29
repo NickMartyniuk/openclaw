@@ -500,8 +500,9 @@ describe("subagent announce timeout config", () => {
       roundOneReply: undefined,
     });
 
-    expect(didAnnounce).toBe(false);
-    expect(findFinalDirectAgentCall()).toBeUndefined();
+    expect(didAnnounce).toBe(true);
+    expect(waitForEmbeddedAgentRunEndMock).not.toHaveBeenCalled();
+    expect(findFinalDirectAgentCall()).toBeTruthy();
   });
 
   it("does not announce cached reply text when the child run terminally failed", async () => {

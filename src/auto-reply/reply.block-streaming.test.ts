@@ -33,7 +33,8 @@ vi.mock("../agents/model-selection.js", async () => {
     resolveModelRefFromString: vi.fn(() => null),
   };
 });
-vi.mock("../agents/timeout.js", () => ({
+vi.mock("../agents/timeout.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../agents/timeout.js")>()),
   resolveAgentTimeoutMs: vi.fn(() => 60_000),
 }));
 vi.mock("../agents/workspace.js", () => ({

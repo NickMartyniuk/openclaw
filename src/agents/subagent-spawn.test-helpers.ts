@@ -134,6 +134,7 @@ export async function loadSubagentSpawnModuleForTest(params: {
   resolveParentForkDecisionMock?: MockFn;
   pruneLegacyStoreKeysMock?: MockFn;
   registerSubagentRunMock?: MockFn;
+  createRunIdMock?: () => string;
   armSubagentRunTimeoutMock?: MockFn;
   releaseSubagentRunMock?: MockFn;
   discardFailedSubagentSpawnRunMock?: MockFn;
@@ -291,6 +292,11 @@ export async function loadSubagentSpawnModuleForTest(params: {
   }));
 
   const subagentSpawnModule = await import("./subagent-spawn.js");
+  if (params.createRunIdMock) {
+    subagentSpawnModule.testing.setDepsForTest({
+      createRunId: params.createRunIdMock,
+    });
+  }
   return {
     ...subagentSpawnModule,
     resetSubagentRegistryForTests,

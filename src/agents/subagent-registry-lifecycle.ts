@@ -23,6 +23,7 @@ import {
   buildAnnounceIdempotencyKey,
 } from "./announce-idempotency.js";
 import { removeInternalSessionEffectsTranscript } from "./internal-session-effects.js";
+import { isHardAgentRunTimeoutPhase } from "./run-timeout-attribution.js";
 import type { SubagentAnnounceDeliveryResult } from "./subagent-announce-dispatch.js";
 import { type SubagentRunOutcome, withSubagentOutcomeTiming } from "./subagent-announce-output.js";
 import {
@@ -145,6 +146,14 @@ export function createSubagentRegistryLifecycleController(params: {
         authoritative: boolean;
       }
     | undefined;
+  getAuthoritativeLifecycleTimeout?(runId: string):
+    | {
+        endedAt: number;
+        timeoutPhase: SubagentRunOutcome["timeoutPhase"];
+        providerStarted?: boolean;
+      }
+    | undefined;
+  clearAuthoritativeLifecycleTimeout?(runId: string): void;
   countPendingDescendantRuns(rootSessionKey: string): number;
   suppressAnnounceForSteerRestart(entry?: SubagentRunRecord): boolean;
   shouldEmitEndedHookForRun(args: {
@@ -1103,20 +1112,40 @@ export function createSubagentRegistryLifecycleController(params: {
     startedAt?: number;
   }) => {
     const pendingTimeout = params.getPendingLifecycleTimeout(completeParams.runId);
+    const authoritativeTimeout = params.getAuthoritativeLifecycleTimeout?.(completeParams.runId);
+    const entry = params.runs.get(completeParams.runId);
+    if (!entry) {
+      return;
+    }
+    if (
+      authoritativeTimeout &&
+      completeParams.outcome.status !== "timeout" &&
+      (typeof completeParams.endedAt !== "number" ||
+        completeParams.endedAt > authoritativeTimeout.endedAt)
+    ) {
+      return;
+    }
     if (
       pendingTimeout?.authoritative === true &&
       completeParams.outcome.status !== "timeout" &&
       (typeof completeParams.endedAt !== "number" ||
         completeParams.endedAt > pendingTimeout.endedAt)
     ) {
-      return;
+      const observedDeadline = resolveSubagentRunDeadlineMs(entry, completeParams.startedAt);
+      if (
+        typeof observedDeadline === "number" &&
+        (typeof completeParams.startedAt !== "number" ||
+          completeParams.startedAt < pendingTimeout.endedAt) &&
+        typeof completeParams.endedAt === "number" &&
+        completeParams.endedAt <= observedDeadline
+      ) {
+        params.clearPendingLifecycleTimeout(completeParams.runId);
+      } else {
+        return;
+      }
     }
     params.clearPendingLifecycleError(completeParams.runId);
     params.clearPendingLifecycleTimeout(completeParams.runId);
-    const entry = params.runs.get(completeParams.runId);
-    if (!entry) {
-      return;
-    }
     const replacingTimeoutWithEarlierOk =
       entry.outcome?.status === "timeout" &&
       typeof entry.endedAt === "number" &&
@@ -1124,7 +1153,16 @@ export function createSubagentRegistryLifecycleController(params: {
       typeof completeParams.endedAt === "number" &&
       completeParams.endedAt <= entry.endedAt;
     if (
+      !params.getAuthoritativeLifecycleTimeout &&
       entry.outcome?.status === "timeout" &&
+      typeof entry.endedAt === "number" &&
+      completeParams.outcome.status !== "timeout" &&
+      (typeof completeParams.endedAt !== "number" || completeParams.endedAt > entry.endedAt)
+    ) {
+      return;
+    }
+    if (
+      isHardAgentRunTimeoutPhase(entry.outcome?.timeoutPhase) &&
       typeof entry.endedAt === "number" &&
       completeParams.outcome.status !== "timeout" &&
       (typeof completeParams.endedAt !== "number" || completeParams.endedAt > entry.endedAt)
@@ -1148,6 +1186,19 @@ export function createSubagentRegistryLifecycleController(params: {
     let endedAt = typeof completeParams.endedAt === "number" ? completeParams.endedAt : Date.now();
     let completionOutcome = completeParams.outcome;
     let completionReason = completeParams.reason;
+    if (
+      completionOutcome.status === "timeout" &&
+      authoritativeTimeout &&
+      !completionOutcome.timeoutPhase
+    ) {
+      completionOutcome = {
+        ...completionOutcome,
+        timeoutPhase: authoritativeTimeout.timeoutPhase,
+        ...(authoritativeTimeout.providerStarted !== undefined
+          ? { providerStarted: authoritativeTimeout.providerStarted }
+          : {}),
+      };
+    }
     if (
       shouldPreservePublishedExplicitRunTimeout({
         entry,
@@ -1237,6 +1288,9 @@ export function createSubagentRegistryLifecycleController(params: {
 
     if (mutated) {
       params.persist();
+    }
+    if (completionOutcome.status === "timeout") {
+      params.clearAuthoritativeLifecycleTimeout?.(completeParams.runId);
     }
     safeFinalizeSubagentTaskRun({
       entry,

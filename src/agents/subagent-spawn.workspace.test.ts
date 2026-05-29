@@ -108,6 +108,7 @@ describe("spawnSubagentDirect workspace inheritance", () => {
       getRuntimeConfig: () => hoisted.configOverride,
       registerSubagentRunMock: hoisted.registerSubagentRunMock,
       hookRunner: hoisted.hookRunner,
+      createRunIdMock: () => "run-thread-register-fail",
       resolveAgentConfig: resolveTestAgentConfig,
       resolveAgentWorkspaceDir: resolveTestAgentWorkspace,
       resolveSandboxRuntimeStatus: hoisted.resolveSandboxRuntimeStatusMock,
@@ -314,7 +315,7 @@ describe("spawnSubagentDirect workspace inheritance", () => {
     expect(result.status).toBe("error");
     expect(result.error).toBe("spawn startup failed");
     expect(result.childSessionKey).toMatch(/^agent:main:subagent:/);
-    expect(hoisted.registerSubagentRunMock).not.toHaveBeenCalled();
+    expect(hoisted.registerSubagentRunMock).toHaveBeenCalledTimes(1);
 
     const deleteCall = findLastSessionDeleteCall();
     expect(deleteCall?.params?.key).toBe(result.childSessionKey);

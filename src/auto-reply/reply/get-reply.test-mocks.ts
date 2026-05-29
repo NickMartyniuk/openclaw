@@ -24,7 +24,8 @@ vi.mock("../../agents/model-selection.js", async () => {
   };
 });
 
-vi.mock("../../agents/timeout.js", () => ({
+vi.mock("../../agents/timeout.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../agents/timeout.js")>()),
   resolveAgentTimeoutMs: vi.fn(() => 60000),
 }));
 

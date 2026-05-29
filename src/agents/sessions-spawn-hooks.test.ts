@@ -191,6 +191,7 @@ beforeAll(async () => {
       runSubagentSpawned: hookRunnerMocks.runSubagentSpawned,
       runSubagentEnded: hookRunnerMocks.runSubagentEnded,
     },
+    createRunIdMock: () => "run-1",
     resetModules: false,
     sessionStorePath: "/tmp/subagent-spawn-hooks-session-store.json",
   }));

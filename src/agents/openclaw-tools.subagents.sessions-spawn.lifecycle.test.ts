@@ -264,7 +264,7 @@ describe("openclaw-tools: subagents (sessions_spawn lifecycle)", () => {
     await waitForRunCleanup(child.sessionKey);
 
     const childWait = ctx.waitCalls.find((call) => call.runId === child.runId);
-    expect(childWait?.timeoutMs).toBe(1000);
+    expect(childWait?.timeoutMs).toBe(16_000);
     // Cleanup should patch the label
     const labelPatch = patchCalls.find((call) => call.label === "my-task");
     expect(labelPatch?.key).toBe(child.sessionKey);
@@ -312,7 +312,7 @@ describe("openclaw-tools: subagents (sessions_spawn lifecycle)", () => {
       const params = call.params as { lane?: string } | undefined;
       return call.method === "agent" && params?.lane === "subagent";
     });
-    expect(childAgentCall?.timeoutMs).toBe(125_000);
+    expect(childAgentCall?.timeoutMs).toBe(140_000);
   });
 
   it("sessions_spawn retires bundle MCP runtime when run-mode cleanup completes", async () => {
@@ -396,7 +396,7 @@ describe("openclaw-tools: subagents (sessions_spawn lifecycle)", () => {
     );
 
     const childWait = ctx.waitCalls.find((call) => call.runId === child.runId);
-    expect(childWait?.timeoutMs).toBe(1000);
+    expect(childWait?.timeoutMs).toBe(16_000);
 
     const agentCalls = ctx.calls.filter((call) => call.method === "agent");
     expect(agentCalls).toHaveLength(2);
@@ -463,7 +463,7 @@ describe("openclaw-tools: subagents (sessions_spawn lifecycle)", () => {
     await waitForSessionsSpawnEvent("delete cleanup", () => Boolean(deletedKey));
 
     const childWait = ctx.waitCalls.find((call) => call.runId === child.runId);
-    expect(childWait?.timeoutMs).toBe(1000);
+    expect(childWait?.timeoutMs).toBe(16_000);
     expect(child.sessionKey?.startsWith("agent:main:subagent:")).toBe(true);
 
     // Two agent calls: subagent spawn + main agent trigger
@@ -521,7 +521,7 @@ describe("openclaw-tools: subagents (sessions_spawn lifecycle)", () => {
     await waitForRunCleanup(childSessionKey);
 
     const childWait = ctx.waitCalls.find((call) => call.runId === child.runId);
-    expect(childWait?.timeoutMs).toBe(1000);
+    expect(childWait?.timeoutMs).toBe(16_000);
     expect(getLatestSubagentRunByChildSessionKey(childSessionKey)?.outcome?.status).toBe("timeout");
   });
 

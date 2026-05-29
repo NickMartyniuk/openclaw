@@ -795,7 +795,7 @@ describe("subagent registry lifecycle hardening", () => {
       },
       endedAt: 4_250,
       expectsCompletionMessage: true,
-      completion: { resultText: null, capturedAt: 4_250 },
+      completion: { required: true, resultText: null, capturedAt: 4_250 },
     });
     const controller = createLifecycleController({
       entry,

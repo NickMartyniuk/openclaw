@@ -369,7 +369,7 @@ describe("waitForAgentJob", () => {
       const runId = `run-error-timeout-stable-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       let settled = false;
       const snapshotPromise = waitForAgentJob({ runId, timeoutMs: 30_000 });
-      snapshotPromise.then(() => {
+      void snapshotPromise.then(() => {
         settled = true;
       });
 
@@ -427,7 +427,7 @@ describe("waitForAgentJob", () => {
       const runId = `run-aborted-timeout-stable-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       let settled = false;
       const snapshotPromise = waitForAgentJob({ runId, timeoutMs: 30_000 });
-      snapshotPromise.then(() => {
+      void snapshotPromise.then(() => {
         settled = true;
       });
 
