@@ -169,6 +169,7 @@ function resolveCodingToolConstructionPlanForAllowlist(
 export function resolveEmbeddedAttemptToolConstructionPlan(params: {
   disableTools?: boolean;
   isRawModelRun?: boolean;
+  toolsEnabled?: boolean;
   toolsAllow?: string[];
   forceMessageTool?: boolean;
 }): {
@@ -177,7 +178,11 @@ export function resolveEmbeddedAttemptToolConstructionPlan(params: {
   runtimeToolAllowlist?: string[];
   codingToolConstructionPlan: OpenClawCodingToolConstructionPlan;
 } {
-  if (params.disableTools === true || params.isRawModelRun === true) {
+  if (
+    params.disableTools === true ||
+    params.isRawModelRun === true ||
+    params.toolsEnabled === false
+  ) {
     return {
       constructTools: false,
       includeCoreTools: false,
