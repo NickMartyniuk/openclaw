@@ -33,6 +33,11 @@ const {
   summarizeDeviceTokens,
 } = mocks;
 
+const gatewayAuthEnvSnapshot = {
+  token: process.env.OPENCLAW_GATEWAY_TOKEN,
+  password: process.env.OPENCLAW_GATEWAY_PASSWORD,
+};
+
 vi.mock("../gateway/call.js", () => ({
   callGateway: mocks.callGateway,
   formatGatewayTransportErrorJson: mocks.formatGatewayTransportErrorJson,
@@ -1513,11 +1518,23 @@ describe("devices cli list", () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  delete process.env.OPENCLAW_GATEWAY_TOKEN;
+  delete process.env.OPENCLAW_GATEWAY_PASSWORD;
   runtime.exit.mockImplementation(() => {});
   formatGatewayTransportErrorJson.mockReturnValue(null);
 });
 
 afterEach(() => {
+  if (gatewayAuthEnvSnapshot.token === undefined) {
+    delete process.env.OPENCLAW_GATEWAY_TOKEN;
+  } else {
+    process.env.OPENCLAW_GATEWAY_TOKEN = gatewayAuthEnvSnapshot.token;
+  }
+  if (gatewayAuthEnvSnapshot.password === undefined) {
+    delete process.env.OPENCLAW_GATEWAY_PASSWORD;
+  } else {
+    process.env.OPENCLAW_GATEWAY_PASSWORD = gatewayAuthEnvSnapshot.password;
+  }
   buildGatewayConnectionDetails.mockReturnValue({
     url: "ws://127.0.0.1:18789",
     urlSource: "local loopback",
