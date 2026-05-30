@@ -202,7 +202,7 @@ describe("devices cli gateway auth", () => {
     await runDevicesCommand([
       "list",
       "--url",
-      "ws://10.42.1.7:18789",
+      "ws://192.0.2.7:18789",
       "--token",
       "shared-token",
       "--json",
