@@ -1797,10 +1797,11 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           const instanceIdRaw = connectParams.client.instanceId;
           const instanceId = typeof instanceIdRaw === "string" ? instanceIdRaw.trim() : "";
           const nodeIdsForPairing = new Set<string>([nodeSession.nodeId]);
-          if (nodePairingId) {
+          const shouldRecordStablePairingMetadata = matchedPairedNode || !rejectedStablePairedNode;
+          if (nodePairingId && shouldRecordStablePairingMetadata) {
             nodeIdsForPairing.add(nodePairingId);
           }
-          if (instanceId) {
+          if (instanceId && shouldRecordStablePairingMetadata) {
             nodeIdsForPairing.add(instanceId);
           }
           for (const nodeId of nodeIdsForPairing) {
