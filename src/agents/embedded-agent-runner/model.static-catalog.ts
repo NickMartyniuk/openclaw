@@ -1,11 +1,11 @@
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import type { Model } from "../../llm/types.js";
 import { planManifestModelCatalogRows } from "../../model-catalog/manifest-planner.js";
 import type { NormalizedModelCatalogRow } from "../../model-catalog/types.js";
 import { listOpenClawPluginManifestMetadata } from "../../plugins/manifest-metadata-scan.js";
 import { loadPluginManifestRegistry } from "../../plugins/manifest-registry.js";
 import type { PluginManifestRecord } from "../../plugins/manifest-registry.js";
 import { loadPluginManifest } from "../../plugins/manifest.js";
+import type { ProviderRuntimeModel } from "../../plugins/provider-runtime-model.types.js";
 import { normalizeStaticProviderModelId } from "../model-ref-shared.js";
 import { normalizeProviderId } from "../provider-id.js";
 
@@ -24,7 +24,7 @@ function rowMatchesModel(params: {
   );
 }
 
-function modelFromStaticCatalogRow(row: NormalizedModelCatalogRow): Model {
+function modelFromStaticCatalogRow(row: NormalizedModelCatalogRow): ProviderRuntimeModel {
   return {
     id: row.id,
     name: row.name || row.id,
@@ -40,7 +40,7 @@ function modelFromStaticCatalogRow(row: NormalizedModelCatalogRow): Model {
     headers: row.headers,
     compat: row.compat,
     mediaInput: row.mediaInput,
-  } as Model;
+  } as ProviderRuntimeModel;
 }
 
 type StaticCatalogPlugin = Parameters<
@@ -144,7 +144,7 @@ export function resolveBundledStaticCatalogModel(params: {
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
   includeRuntimeDiscovery?: boolean;
-}): Model | undefined {
+}): ProviderRuntimeModel | undefined {
   const provider = normalizeProviderId(params.provider);
   if (!provider || !params.modelId.trim()) {
     return undefined;
