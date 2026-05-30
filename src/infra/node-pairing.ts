@@ -307,7 +307,7 @@ export async function approveNodePairing(
     const existing = state.pairedByNodeId[pending.nodeId];
     const node: NodePairingPairedNode = {
       nodeId: pending.nodeId,
-      deviceId: pending.deviceId,
+      deviceId: pending.deviceId ?? existing?.deviceId,
       token: newToken(),
       clientId: pending.clientId,
       clientMode: pending.clientMode,
@@ -394,11 +394,23 @@ export async function updatePairedNodeMetadata(
     if (!existing) {
       return false;
     }
+    const nextDeviceId = (() => {
+      if (patch.deviceId === undefined) {
+        return existing.deviceId;
+      }
+      if (existing.deviceId && existing.deviceId !== patch.deviceId) {
+        return null;
+      }
+      return patch.deviceId;
+    })();
+    if (nextDeviceId === null) {
+      return false;
+    }
 
     const next: NodePairingPairedNode = {
       ...existing,
       clientId: patch.clientId ?? existing.clientId,
-      deviceId: patch.deviceId ?? existing.deviceId,
+      deviceId: nextDeviceId,
       clientMode: patch.clientMode ?? existing.clientMode,
       displayName: patch.displayName ?? existing.displayName,
       platform: patch.platform ?? existing.platform,

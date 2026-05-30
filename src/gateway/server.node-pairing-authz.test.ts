@@ -385,6 +385,58 @@ describe("gateway node pairing authorization", () => {
       }
     });
 
+    test("binds public stable-node approvals to the first verified device reconnect", async () => {
+      const pairedDevice = await pairDeviceIdentity({
+        name: "node-public-stable-bind",
+        role: "node",
+        scopes: [],
+        clientId: GATEWAY_CLIENT_NAMES.NODE_HOST,
+        clientMode: GATEWAY_CLIENT_MODES.NODE,
+      });
+      const stableNodeId = "stable-node-public-approval";
+      const request = await requestNodePairing({
+        nodeId: stableNodeId,
+        platform: "macos",
+        deviceFamily: "Mac",
+        commands: ["system.which"],
+      });
+      requireApprovedPairing(
+        await approveNodePairing(request.request.requestId, {
+          callerScopes: ["operator.pairing", "operator.admin"],
+        }),
+      );
+
+      const controlWs = await openTrackedWs(started.port);
+      let nodeClient: Awaited<ReturnType<typeof connectGatewayClient>> | undefined;
+      try {
+        await connectOk(controlWs, { token: "secret" });
+        nodeClient = await connectNodeClient({
+          port: started.port,
+          deviceIdentity: pairedDevice.identity,
+          instanceId: stableNodeId,
+          commands: ["system.which"],
+        });
+
+        await vi.waitFor(async () => {
+          const list = await rpcReq<{
+            nodes?: Array<{ nodeId: string; connected?: boolean; commands?: string[] }>;
+          }>(controlWs, "node.list", {});
+          const node = list.payload?.nodes?.find((entry) => entry.nodeId === stableNodeId);
+          if (node?.connected && node.commands?.includes("system.which")) {
+            return;
+          }
+          throw new Error(
+            `public stable node approval not usable yet: ${JSON.stringify(list.payload)}`,
+          );
+        });
+        const pairedStableNode = await getPairedNode(stableNodeId);
+        expect(pairedStableNode?.deviceId).toBe(pairedDevice.identity.deviceId);
+      } finally {
+        controlWs.close();
+        await nodeClient?.stopAndWait();
+      }
+    });
+
     test("live-updates a first-time stable node when its pending request is approved", async () => {
       const pairedDevice = await pairDeviceIdentity({
         name: "node-first-stable",

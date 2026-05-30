@@ -89,6 +89,70 @@ describe("node pairing tokens", () => {
     });
   });
 
+  test("preserves an existing device binding when re-approving an unbound request", async () => {
+    await withNodePairingDir(async (baseDir) => {
+      const boundRequest = await requestNodePairing(
+        {
+          nodeId: "stable-node-1",
+          deviceId: "device-1",
+          platform: "windows",
+          commands: ["system.which"],
+        },
+        baseDir,
+      );
+      await approveNodePairing(
+        boundRequest.request.requestId,
+        { callerScopes: ["operator.pairing", "operator.admin"] },
+        baseDir,
+      );
+      const unboundRequest = await requestNodePairing(
+        {
+          nodeId: "stable-node-1",
+          platform: "windows",
+          commands: ["system.run"],
+        },
+        baseDir,
+      );
+      await approveNodePairing(
+        unboundRequest.request.requestId,
+        { callerScopes: ["operator.pairing", "operator.admin"] },
+        baseDir,
+      );
+
+      const paired = await getPairedNode("stable-node-1", baseDir);
+      expect(paired?.deviceId).toBe("device-1");
+      expect(paired?.commands).toEqual(["system.run"]);
+    });
+  });
+
+  test("does not overwrite a stable node device binding through metadata updates", async () => {
+    await withNodePairingDir(async (baseDir) => {
+      const request = await requestNodePairing(
+        {
+          nodeId: "stable-node-1",
+          deviceId: "device-1",
+          platform: "windows",
+          commands: ["system.which"],
+        },
+        baseDir,
+      );
+      await approveNodePairing(
+        request.request.requestId,
+        { callerScopes: ["operator.pairing", "operator.admin"] },
+        baseDir,
+      );
+
+      await expect(
+        updatePairedNodeMetadata("stable-node-1", { deviceId: "device-2" }, baseDir),
+      ).resolves.toBe(false);
+      await expect(
+        updatePairedNodeMetadata("stable-node-1", { deviceId: "device-1" }, baseDir),
+      ).resolves.toBe(true);
+      const paired = await getPairedNode("stable-node-1", baseDir);
+      expect(paired?.deviceId).toBe("device-1");
+    });
+  });
+
   test("does not refresh a pending stable node request with a different device id", async () => {
     await withNodePairingDir(async (baseDir) => {
       const first = await requestNodePairing(

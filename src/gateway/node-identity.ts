@@ -43,5 +43,9 @@ export function nodePairingMatchesConnectDevice(params: {
   if (params.pairedNode.deviceId) {
     return params.pairedNode.deviceId === deviceId;
   }
-  return params.pairedNode.nodeId === deviceId;
+  const stableInstanceId =
+    params.connect.client.mode === GATEWAY_CLIENT_MODES.NODE
+      ? normalizeNodeIdentityPart(params.connect.client.instanceId)
+      : undefined;
+  return params.pairedNode.nodeId === deviceId || params.pairedNode.nodeId === stableInstanceId;
 }
