@@ -166,6 +166,17 @@ function mergePairedNodesWithEffectiveNodes(
   return rows;
 }
 
+function hasReportedNodeSurface(node: Partial<NodeListNode>): boolean {
+  return (node.commands?.length ?? 0) > 0 || (node.caps?.length ?? 0) > 0;
+}
+
+function suppressTransientCommandlessPairingRow(
+  node: PairedNodeListRow,
+  pendingNodeIds: Set<string>,
+): boolean {
+  return pendingNodeIds.has(node.nodeId) && !hasReportedNodeSurface(node);
+}
+
 async function tryReadNodeList(opts: NodesRpcOpts): Promise<NodeListNode[] | null> {
   try {
     return parseNodeList(await callGatewayCli("node.list", opts, {}));
@@ -402,7 +413,11 @@ export function registerNodesStatusCommands(nodes: Command) {
           const effectiveNodes = hasFilters
             ? parseNodeList(await callGatewayCli("node.list", opts, {}))
             : await tryReadNodeList(opts);
-          const effectivePairedRows = mergePairedNodesWithEffectiveNodes(paired, effectiveNodes);
+          const pendingNodeIds = new Set(pendingRows.map((entry) => entry.nodeId));
+          const effectivePairedRows = mergePairedNodesWithEffectiveNodes(
+            paired,
+            effectiveNodes,
+          ).filter((node) => !suppressTransientCommandlessPairingRow(node, pendingNodeIds));
           const filteredPaired = effectivePairedRows.filter((node) => {
             if (connectedOnly) {
               if (!node.connected) {
