@@ -11,6 +11,8 @@ import { buildMentionConfig } from "./auto-reply/mentions.js";
 import { createEchoTracker } from "./auto-reply/monitor/echo.js";
 import { awaitBackgroundTasks } from "./auto-reply/monitor/last-route.js";
 import { createWebOnMessageHandler } from "./auto-reply/monitor/on-message.js";
+import { createTestWebInboundMessage } from "./inbound/test-message.test-helper.js";
+import type { LegacyFlatWebInboundMessage, WebInboundMessageInput } from "./inbound/types.js";
 
 const updateLastRouteInBackgroundMock = vi.hoisted(() => vi.fn());
 
@@ -78,23 +80,43 @@ function buildInboundMessage(params: {
   senderName?: string;
   selfE164?: string;
 }) {
-  return {
-    id: params.id,
+  return createTestWebInboundMessage({
+    event: {
+      id: params.id,
+      timestamp: params.timestamp,
+    },
+    payload: {
+      body: params.body ?? "hello",
+    },
+    platform: {
+      chatJid: params.chatId,
+      recipientJid: params.to ?? "+2000",
+      senderE164: params.senderE164,
+      senderName: params.senderName,
+      selfE164: params.selfE164,
+    },
     from: params.from,
     conversationId: params.conversationId,
-    to: params.to ?? "+2000",
-    body: params.body ?? "hello",
-    timestamp: params.timestamp,
     chatType: params.chatType,
-    chatId: params.chatId,
     accountId: params.accountId ?? "default",
-    senderE164: params.senderE164,
-    senderName: params.senderName,
-    selfE164: params.selfE164,
+  });
+}
+
+function buildLegacyFlatMessage(overrides: Partial<LegacyFlatWebInboundMessage> = {}) {
+  return {
+    id: "flat-msg",
+    from: "+1000",
+    conversationId: "+1000",
+    to: "+2000",
+    accountId: "default",
+    body: "hello",
+    chatType: "direct",
+    chatId: "direct:+1000",
     sendComposing: vi.fn().mockResolvedValue(undefined),
     reply: vi.fn().mockResolvedValue(createAcceptedWhatsAppSendResult("text", "r1")),
     sendMedia: vi.fn().mockResolvedValue(createAcceptedWhatsAppSendResult("media", "m1")),
-  };
+    ...overrides,
+  } satisfies LegacyFlatWebInboundMessage;
 }
 
 describe("web auto-reply last-route", () => {
@@ -184,6 +206,40 @@ describe("web auto-reply last-route", () => {
       Timestamp: now,
     });
 
+    await store.cleanup();
+  });
+
+  it("accepts deprecated flat injected inbound messages", async () => {
+    const now = Date.now();
+    const store = await makeSessionStore({
+      "agent:main:main": { sessionId: "sid", updatedAt: now - 1 },
+    });
+    const reply = vi.fn().mockResolvedValue(createAcceptedWhatsAppSendResult("text", "r1"));
+    const msg = buildLegacyFlatMessage({ timestamp: now, reply });
+    const { handler, backgroundTasks } = createHandlerForTest({
+      cfg: makeCfg(store.storePath),
+      replyResolver: vi.fn().mockResolvedValue({ text: "ok" }),
+    });
+
+    await handler(msg);
+    await awaitBackgroundTasks(backgroundTasks);
+
+    expect(reply).toHaveBeenCalledWith("ok", undefined);
+    await store.cleanup();
+  });
+
+  it("rejects partial nested injected inbound messages", async () => {
+    const store = await makeSessionStore({});
+    const msg = {
+      ...buildLegacyFlatMessage({ id: "partial-msg" }),
+      payload: { body: "partial nested" },
+    } as unknown as WebInboundMessageInput;
+    const { handler } = createHandlerForTest({
+      cfg: makeCfg(store.storePath),
+      replyResolver: vi.fn().mockResolvedValue(undefined),
+    });
+
+    await expect(handler(msg)).rejects.toThrow(/legacy flat or canonical nested/);
     await store.cleanup();
   });
 
