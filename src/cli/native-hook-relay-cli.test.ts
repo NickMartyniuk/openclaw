@@ -176,40 +176,13 @@ describe("native hook relay CLI", () => {
     );
   });
 
-  it.each([
-    {
-      event: "pre_tool_use",
-      stdout: {
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason: "Native hook relay unavailable",
-        },
-      },
-    },
-    {
-      event: "permission_request",
-      stdout: {
-        hookSpecificOutput: {
-          hookEventName: "PermissionRequest",
-          decision: {
-            behavior: "deny",
-            message: "Native hook relay unavailable",
-          },
-        },
-      },
-    },
-    {
-      event: "post_tool_use",
-      stdout: null,
-    },
-  ])(
-    "does not fall back to the gateway after a stale direct bridge error for $event",
-    async (testCase) => {
+  it.each(["pre_tool_use", "permission_request", "post_tool_use"])(
+    "falls back to the gateway after a stale direct bridge error for %s",
+    async (event) => {
       const invokeBridge = vi.fn(async () => {
         throw new Error("native hook relay bridge stale registration");
       });
-      const callGateway = vi.fn(async () => ({ stdout: "unexpected", stderr: "", exitCode: 0 }));
+      const callGateway = vi.fn(async () => ({ stdout: "gateway", stderr: "", exitCode: 0 }));
       const stdout = createWritableTextBuffer();
       const stderr = createWritableTextBuffer();
 
@@ -218,7 +191,7 @@ describe("native hook relay CLI", () => {
           provider: "codex",
           relayId: "relay-1",
           generation: "generation-1",
-          event: testCase.event,
+          event,
         },
         {
           stdin: createReadableTextStream("{}"),
@@ -230,14 +203,20 @@ describe("native hook relay CLI", () => {
       );
 
       expect(exitCode).toBe(0);
-      if (testCase.stdout) {
-        expect(JSON.parse(stdout.text())).toEqual(testCase.stdout);
-      } else {
-        expect(stdout.text()).toBe("");
-      }
-      expect(stderr.text()).toContain("native hook relay unavailable");
-      expect(stderr.text()).toContain("native hook relay bridge stale registration");
-      expect(callGateway).not.toHaveBeenCalled();
+      expect(stdout.text()).toBe("gateway");
+      expect(stderr.text()).toBe("");
+      expect(callGateway).toHaveBeenCalledWith({
+        method: "nativeHook.invoke",
+        params: {
+          provider: "codex",
+          relayId: "relay-1",
+          generation: "generation-1",
+          event,
+          rawPayload: {},
+        },
+        timeoutMs: 5_000,
+        scopes: ["operator.admin"],
+      });
     },
   );
 
