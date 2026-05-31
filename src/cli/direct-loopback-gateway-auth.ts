@@ -99,6 +99,17 @@ async function isConfiguredSharedGatewayToken(params: {
   return credentials?.token === params.token;
 }
 
+async function isConfiguredSharedGatewayPassword(params: {
+  password: string | undefined;
+  config?: OpenClawConfig;
+}): Promise<boolean> {
+  if (!params.password) {
+    return false;
+  }
+  const credentials = await resolveConfiguredSharedGatewayCredentials(params.config);
+  return credentials?.password === params.password;
+}
+
 function loadConfigForDirectAuthProbe(): OpenClawConfig | undefined {
   try {
     return loadConfig({ skipPluginValidation: true, pin: false });
@@ -151,7 +162,8 @@ export async function shouldUseDirectLoopbackGatewayAuth(
   if (!token && !password) {
     return true;
   }
-  return Boolean(
-    password || (await isConfiguredSharedGatewayToken({ token, config: opts.config })),
+  return (
+    (await isConfiguredSharedGatewayPassword({ password, config: opts.config })) ||
+    (await isConfiguredSharedGatewayToken({ token, config: opts.config }))
   );
 }

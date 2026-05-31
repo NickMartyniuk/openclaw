@@ -119,6 +119,60 @@ describe("shouldUseDirectLoopbackGatewayAuth", () => {
     );
   });
 
+  it("recognizes literal configured gateway passwords as shared loopback auth", async () => {
+    await withTempHomeConfig(
+      {
+        gateway: {
+          auth: { mode: "password", password: "shared-password" },
+        },
+      },
+      async () => {
+        await withEnvOverride({ OPENCLAW_GATEWAY_PASSWORD: undefined }, async () => {
+          expect(
+            await shouldUseDirectLoopbackGatewayAuth({
+              url: "ws://127.0.0.1:18789",
+              password: "shared-password",
+            }),
+          ).toBe(true);
+        });
+      },
+    );
+  });
+
+  it("keeps unconfigured loopback passwords on the device-token-capable path", async () => {
+    await withTempHomeConfig(
+      {
+        gateway: {
+          auth: { mode: "password", password: "shared-password" },
+        },
+      },
+      async () => {
+        await withEnvOverride({ OPENCLAW_GATEWAY_PASSWORD: undefined }, async () => {
+          expect(
+            await shouldUseDirectLoopbackGatewayAuth({
+              url: "ws://127.0.0.1:18789",
+              password: "operator-password",
+            }),
+          ).toBe(false);
+        });
+      },
+    );
+  });
+
+  it("does not treat explicit loopback passwords as shared when gateway auth is disabled", async () => {
+    expect(
+      await shouldUseDirectLoopbackGatewayAuth({
+        url: "ws://127.0.0.1:18789",
+        password: "anything",
+        config: {
+          gateway: {
+            auth: { mode: "none" },
+          },
+        },
+      }),
+    ).toBe(false);
+  });
+
   it("recognizes implicit env gateway tokens as shared loopback auth", async () => {
     await withTempHomeConfig(
       {
