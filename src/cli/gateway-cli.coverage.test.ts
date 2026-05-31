@@ -1,4 +1,3 @@
-// oxlint-disable typescript/no-unsafe-type-assertion -- Tests inspect mocked gateway CLI payloads whose runtime shapes are part of coverage assertions.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

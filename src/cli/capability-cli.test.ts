@@ -1,4 +1,3 @@
-// oxlint-disable typescript/no-unsafe-type-assertion -- Tests inspect mocked CLI/gateway calls whose payloads intentionally cross typed boundaries.
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
