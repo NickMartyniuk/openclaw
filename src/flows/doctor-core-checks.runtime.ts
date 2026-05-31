@@ -25,6 +25,7 @@ import { supportsModelTools } from "../agents/model-tool-support.js";
 import { normalizeAgentRuntimeTools } from "../agents/runtime-plan/tools.js";
 import { collectExplicitAllowlist, normalizeToolName } from "../agents/tool-policy.js";
 import {
+  filterProviderNormalizableTools,
   inspectRuntimeToolInputSchemas,
   type RuntimeToolSchemaDiagnostic,
 } from "../agents/tool-schema-projection.js";
@@ -547,8 +548,13 @@ function toolSchemaDiagnosticToFinding(params: {
   tools: readonly AnyAgentTool[];
   diagnostic: RuntimeToolSchemaDiagnostic;
 }): HealthFinding {
-  const tool = params.tools[params.diagnostic.toolIndex];
-  const pluginId = tool ? getPluginToolMeta(tool)?.pluginId : undefined;
+  let pluginId: string | undefined;
+  try {
+    const tool = params.tools[params.diagnostic.toolIndex];
+    pluginId = tool ? getPluginToolMeta(tool)?.pluginId : undefined;
+  } catch {
+    pluginId = undefined;
+  }
   const owner = pluginId ? ` from plugin ${pluginId}` : "";
   const agent = `Agent ${params.agentId} `;
   const path =
@@ -585,6 +591,23 @@ function collectToolSchemaFindings(params: {
   );
 }
 
+function inspectProviderNormalizableTools(params: {
+  agentId: string;
+  tools: readonly AnyAgentTool[];
+}): { findings: HealthFinding[]; tools: readonly AnyAgentTool[] } {
+  const projection = filterProviderNormalizableTools(params.tools);
+  return {
+    findings: projection.diagnostics.map((diagnostic) =>
+      toolSchemaDiagnosticToFinding({
+        agentId: params.agentId,
+        tools: params.tools,
+        diagnostic,
+      }),
+    ),
+    tools: projection.tools,
+  };
+}
+
 function collectBundleMcpRuntimeToolSchemaFindings(params: {
   bundleRuntime: BundleMcpToolRuntime;
   cfg: OpenClawConfig;
@@ -601,8 +624,12 @@ function collectBundleMcpRuntimeToolSchemaFindings(params: {
     modelId: params.modelRef.model,
     warn: () => {},
   });
-  const normalizedTools = normalizeAgentRuntimeTools({
+  const activeToolProjection = inspectProviderNormalizableTools({
+    agentId: params.agentId,
     tools: activeBundleTools,
+  });
+  const normalizedTools = normalizeAgentRuntimeTools({
+    tools: [...activeToolProjection.tools],
     provider: params.modelRef.provider,
     config: params.cfg,
     workspaceDir: params.workspaceDir,
@@ -611,10 +638,13 @@ function collectBundleMcpRuntimeToolSchemaFindings(params: {
     modelApi: params.model.api,
     model: params.model,
   });
-  return collectToolSchemaFindings({
-    agentId: params.agentId,
-    tools: normalizedTools,
-  });
+  return [
+    ...activeToolProjection.findings,
+    ...collectToolSchemaFindings({
+      agentId: params.agentId,
+      tools: normalizedTools,
+    }),
+  ];
 }
 
 function bundleMcpRuntimeLoadFailureFinding(error: unknown): HealthFinding {
@@ -797,8 +827,12 @@ export async function collectRuntimeToolSchemaFindings(
         allowGatewaySubagentBinding: true,
         emitBeforeToolCallDiagnostics: false,
       });
-      const normalizedTools = normalizeAgentRuntimeTools({
+      const activeToolProjection = inspectProviderNormalizableTools({
+        agentId,
         tools,
+      });
+      const normalizedTools = normalizeAgentRuntimeTools({
+        tools: [...activeToolProjection.tools],
         provider: modelRef.provider,
         config: cfg,
         workspaceDir,
@@ -808,6 +842,7 @@ export async function collectRuntimeToolSchemaFindings(
         model,
       });
       findings.push(
+        ...activeToolProjection.findings,
         ...collectToolSchemaFindings({
           agentId,
           tools: normalizedTools,

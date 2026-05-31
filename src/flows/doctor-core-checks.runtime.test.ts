@@ -341,6 +341,43 @@ describe("doctor runtime tool schema checks", () => {
     expect(mocks.disposeBundleRuntime).toHaveBeenCalledTimes(1);
   });
 
+  it("reports unreadable active tool rows without failing while building doctor findings", async () => {
+    const tools: AnyAgentTool[] = new Proxy(
+      [tool("fuzzplugin_move_angles", { type: "object", properties: {} })],
+      {
+        get(target, property, receiver) {
+          if (property === "0") {
+            throw new Error("fuzz tool row is unreadable");
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    );
+    mocks.createOpenClawCodingTools.mockReturnValueOnce(tools);
+    mocks.normalizeProviderToolSchemasWithPlugin.mockImplementationOnce(({ context }) => {
+      for (const toolEntry of context.tools) {
+        void toolEntry.parameters;
+      }
+      return context.tools;
+    });
+
+    await expect(collectRuntimeToolSchemaFindings({})).resolves.toContainEqual({
+      checkId: "core/doctor/runtime-tool-schemas",
+      severity: "error",
+      message: "Agent main tool tool[0] has an unsupported input schema for runtime projection.",
+      path: "tools.tool[0]",
+      target: "tool[0]",
+      requirement: "tool[0] is unreadable",
+      fixHint:
+        "Disable or update the offending plugin/tool so its parameters are a JSON object schema, then rerun doctor.",
+    });
+    expect(mocks.normalizeProviderToolSchemasWithPlugin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({ tools: [] }),
+      }),
+    );
+  });
+
   it("skips ACP-only agents because they do not use embedded tool projection", async () => {
     mocks.createOpenClawCodingTools.mockImplementation((options) =>
       options?.agentId === "acp-worker"

@@ -340,6 +340,186 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
     expect(activeToolNames).toEqual([["healthy_lookup"]]);
   });
 
+  it("quarantines unreadable tool schemas before provider normalization", async () => {
+    const unreadableTool: Record<string, unknown> = {
+      name: "fuzzplugin_move_angles",
+      label: "FuzzPlugin Move Angles",
+      description: "Move synthetic joints.",
+      execute: async () => ({ text: "bad" }),
+    };
+    Object.defineProperty(unreadableTool, "parameters", {
+      enumerable: true,
+      get() {
+        throw new Error("fuzz tool parameters are unreadable");
+      },
+    });
+    hoisted.getOrCreateSessionMcpRuntimeMock.mockResolvedValue({ runtime: "bundle-mcp" });
+    hoisted.createOpenClawCodingToolsMock.mockReturnValue([
+      {
+        name: "healthy_lookup",
+        label: "Healthy Lookup",
+        description: "Look up safe data.",
+        parameters: { type: "object", properties: {} },
+        execute: async () => ({ text: "ok" }),
+      },
+      unreadableTool,
+    ]);
+
+    const activeToolNames: string[][] = [];
+    await createContextEngineAttemptRunner({
+      contextEngine: createContextEngineBootstrapAndAssemble(),
+      sessionKey,
+      tempPaths,
+      attemptOverrides: {
+        disableTools: false,
+        config: {
+          tools: {
+            codeMode: { enabled: false },
+            toolSearch: false,
+          },
+        } as OpenClawConfig,
+      },
+      createSession: () => {
+        const session = createDefaultEmbeddedSession();
+        session.setActiveToolsByName = (toolNames) => {
+          activeToolNames.push([...toolNames]);
+        };
+        return session;
+      },
+    });
+
+    const sessionOptions = mockParams(
+      hoisted.createAgentSessionMock,
+      0,
+      "createAgentSession options",
+    );
+    expect(
+      mockParams(
+        hoisted.materializeBundleMcpToolsForRunMock,
+        0,
+        "materializeBundleMcpToolsForRun options",
+      ).reservedToolNames,
+    ).toEqual(expect.arrayContaining(["healthy_lookup", "fuzzplugin_move_angles"]));
+    expect(
+      mockParams(hoisted.createBundleLspToolRuntimeMock, 0, "createBundleLspToolRuntime options")
+        .reservedToolNames,
+    ).toEqual(expect.arrayContaining(["healthy_lookup", "fuzzplugin_move_angles"]));
+    const customTools = requireRecords(sessionOptions.customTools, "customTools");
+    expect(customTools.map((tool) => tool.name)).toEqual(["healthy_lookup"]);
+    expect(activeToolNames).toEqual([["healthy_lookup"]]);
+  });
+
+  it("does not crash explicit tool allowlists on unreadable tool rows", async () => {
+    const healthyTool = {
+      name: "healthy_lookup",
+      label: "Healthy Lookup",
+      description: "Look up safe data.",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ text: "ok" }),
+    };
+    const tools = [undefined, healthyTool] as unknown[];
+    Object.defineProperty(tools, "0", {
+      enumerable: true,
+      get() {
+        throw new Error("fuzz tool row is unreadable");
+      },
+    });
+    hoisted.createOpenClawCodingToolsMock.mockReturnValue(tools as never);
+
+    const activeToolNames: string[][] = [];
+    await createContextEngineAttemptRunner({
+      contextEngine: createContextEngineBootstrapAndAssemble(),
+      sessionKey,
+      tempPaths,
+      attemptOverrides: {
+        disableTools: false,
+        config: {
+          tools: {
+            allow: ["healthy_lookup"],
+            codeMode: { enabled: false },
+            toolSearch: false,
+          },
+        } as OpenClawConfig,
+      },
+      createSession: () => {
+        const session = createDefaultEmbeddedSession();
+        session.setActiveToolsByName = (toolNames) => {
+          activeToolNames.push([...toolNames]);
+        };
+        return session;
+      },
+    });
+
+    const sessionOptions = mockParams(
+      hoisted.createAgentSessionMock,
+      0,
+      "createAgentSession options",
+    );
+    const customTools = requireRecords(sessionOptions.customTools, "customTools");
+    expect(customTools.map((tool) => tool.name)).toEqual(["healthy_lookup"]);
+    expect(activeToolNames).toEqual([["healthy_lookup"]]);
+  });
+
+  it("does not crash bundle MCP allowlists on unreadable bundled tool names", async () => {
+    const healthyBundledTool = {
+      name: "fuzzplugin__healthy_lookup",
+      label: "Healthy Lookup",
+      description: "Look up safe bundled data.",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ text: "ok" }),
+    };
+    const unreadableBundledTool: Record<string, unknown> = {
+      label: "Fuzz Move Delta",
+      description: "Move synthetic joints.",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ text: "bad" }),
+    };
+    Object.defineProperty(unreadableBundledTool, "name", {
+      enumerable: true,
+      get() {
+        throw new Error("fuzz bundled tool name is unreadable");
+      },
+    });
+    hoisted.getOrCreateSessionMcpRuntimeMock.mockResolvedValue({ runtime: "bundle-mcp" });
+    hoisted.materializeBundleMcpToolsForRunMock.mockResolvedValue({
+      tools: [unreadableBundledTool, healthyBundledTool],
+      dispose: async () => {},
+    });
+
+    const activeToolNames: string[][] = [];
+    await createContextEngineAttemptRunner({
+      contextEngine: createContextEngineBootstrapAndAssemble(),
+      sessionKey,
+      tempPaths,
+      attemptOverrides: {
+        disableTools: false,
+        config: {
+          tools: {
+            allow: ["fuzzplugin__healthy_lookup"],
+            codeMode: { enabled: false },
+            toolSearch: false,
+          },
+        } as OpenClawConfig,
+      },
+      createSession: () => {
+        const session = createDefaultEmbeddedSession();
+        session.setActiveToolsByName = (toolNames) => {
+          activeToolNames.push([...toolNames]);
+        };
+        return session;
+      },
+    });
+
+    const sessionOptions = mockParams(
+      hoisted.createAgentSessionMock,
+      0,
+      "createAgentSession options",
+    );
+    const customTools = requireRecords(sessionOptions.customTools, "customTools");
+    expect(customTools.map((tool) => tool.name)).toEqual(["fuzzplugin__healthy_lookup"]);
+    expect(activeToolNames).toEqual([["fuzzplugin__healthy_lookup"]]);
+  });
+
   it("keeps the embedded system prompt after active tool selection", async () => {
     let seenSystemPrompt: string | undefined;
 

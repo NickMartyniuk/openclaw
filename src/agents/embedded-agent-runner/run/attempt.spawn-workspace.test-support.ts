@@ -68,6 +68,9 @@ type AttemptSpawnWorkspaceHoisted = {
   ensureGlobalUndiciStreamTimeoutsMock: UnknownMock;
   buildEmbeddedMessageActionDiscoveryInputMock: UnknownMock;
   createOpenClawCodingToolsMock: UnknownMock;
+  getOrCreateSessionMcpRuntimeMock: AsyncUnknownMock;
+  materializeBundleMcpToolsForRunMock: AsyncUnknownMock;
+  createBundleLspToolRuntimeMock: AsyncUnknownMock;
   subscribeEmbeddedAgentSessionMock: Mock<SubscribeEmbeddedAgentSessionFn>;
   acquireSessionWriteLockMock: Mock<AcquireSessionWriteLockFn>;
   installToolResultContextGuardMock: UnknownMock;
@@ -140,6 +143,9 @@ const hoisted = vi.hoisted((): AttemptSpawnWorkspaceHoisted => {
   const ensureGlobalUndiciStreamTimeoutsMock = vi.fn();
   const buildEmbeddedMessageActionDiscoveryInputMock = vi.fn((params: unknown) => params);
   const createOpenClawCodingToolsMock = vi.fn(() => []);
+  const getOrCreateSessionMcpRuntimeMock = vi.fn(async () => undefined);
+  const materializeBundleMcpToolsForRunMock = vi.fn(async () => undefined);
+  const createBundleLspToolRuntimeMock = vi.fn(async () => undefined);
   const installToolResultContextGuardMock = vi.fn(() => () => {});
   const installContextEngineLoopHookMock = vi.fn(() => () => {});
   const flushPendingToolResultsAfterIdleMock = vi.fn(async () => {});
@@ -210,6 +216,9 @@ const hoisted = vi.hoisted((): AttemptSpawnWorkspaceHoisted => {
     ensureGlobalUndiciStreamTimeoutsMock,
     buildEmbeddedMessageActionDiscoveryInputMock,
     createOpenClawCodingToolsMock,
+    getOrCreateSessionMcpRuntimeMock,
+    materializeBundleMcpToolsForRunMock,
+    createBundleLspToolRuntimeMock,
     subscribeEmbeddedAgentSessionMock,
     acquireSessionWriteLockMock,
     installToolResultContextGuardMock,
@@ -593,13 +602,16 @@ vi.mock("../../agent-tools.js", () => ({
 
 vi.mock("../../agent-bundle-mcp-tools.js", () => ({
   createBundleMcpToolRuntime: async () => undefined,
-  getOrCreateSessionMcpRuntime: async () => undefined,
-  materializeBundleMcpToolsForRun: async () => undefined,
+  getOrCreateSessionMcpRuntime: (...args: unknown[]) =>
+    hoisted.getOrCreateSessionMcpRuntimeMock(...args),
+  materializeBundleMcpToolsForRun: (...args: unknown[]) =>
+    hoisted.materializeBundleMcpToolsForRunMock(...args),
   retireSessionMcpRuntime: async () => true,
 }));
 
 vi.mock("../../agent-bundle-lsp-runtime.js", () => ({
-  createBundleLspToolRuntime: async () => undefined,
+  createBundleLspToolRuntime: (...args: unknown[]) =>
+    hoisted.createBundleLspToolRuntimeMock(...args),
 }));
 
 vi.mock("../../../image-generation/runtime.js", () => ({
@@ -967,6 +979,9 @@ export function resetEmbeddedAttemptHarness(
       },
     ];
   });
+  hoisted.getOrCreateSessionMcpRuntimeMock.mockReset().mockResolvedValue(undefined);
+  hoisted.materializeBundleMcpToolsForRunMock.mockReset().mockResolvedValue(undefined);
+  hoisted.createBundleLspToolRuntimeMock.mockReset().mockResolvedValue(undefined);
   hoisted.subscribeEmbeddedAgentSessionMock
     .mockReset()
     .mockImplementation(() => createSubscriptionMock());

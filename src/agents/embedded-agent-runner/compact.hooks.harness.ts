@@ -143,6 +143,15 @@ function createMockToolDefinitions(tools: unknown[] = []) {
   });
 }
 export const createOpenClawCodingToolsMock = vi.fn(() => []);
+export const createBundleMcpToolRuntimeMock = vi.fn(async () => ({
+  tools: [],
+  dispose: vi.fn(async () => {}),
+}));
+export const createBundleLspToolRuntimeMock = vi.fn(async () => ({
+  tools: [],
+  sessions: [],
+  dispose: vi.fn(async () => {}),
+}));
 export const guardSessionManagerMock = vi.fn(() => ({
   flushPendingToolResults: vi.fn(),
 }));
@@ -174,6 +183,11 @@ export const rotateTranscriptAfterCompactionMock: Mock<
   rotated: false,
 }));
 export const enqueueCommandInLaneMock = vi.fn((_lane: unknown, task: () => unknown) => task());
+export const runtimePlanToolsNormalizeMock: Mock<
+  (tools: unknown[], params?: unknown) => unknown[]
+> = vi.fn((tools) => tools);
+const runtimePlanToolsNormalize: AgentRuntimePlan["tools"]["normalize"] = (tools, params) =>
+  runtimePlanToolsNormalizeMock(tools, params) as typeof tools;
 
 function createCompactHooksRuntimePlan(params: BuildAgentRuntimePlanParams): AgentRuntimePlan {
   const modelApi = params.modelApi ?? params.model?.api ?? undefined;
@@ -215,7 +229,7 @@ function createCompactHooksRuntimePlan(params: BuildAgentRuntimePlanParams): Age
       preparedPlanning: {
         loadMetadataSnapshot: () => ({}),
       },
-      normalize: vi.fn((tools) => tools),
+      normalize: runtimePlanToolsNormalize,
       logDiagnostics: vi.fn(),
     },
     transcript: {
@@ -336,6 +350,8 @@ export function resetCompactSessionStateMocks(): void {
   rotateTranscriptAfterCompactionMock.mockResolvedValue({ rotated: false });
   enqueueCommandInLaneMock.mockReset();
   enqueueCommandInLaneMock.mockImplementation((_lane: unknown, task: () => unknown) => task());
+  runtimePlanToolsNormalizeMock.mockReset();
+  runtimePlanToolsNormalizeMock.mockImplementation((tools) => tools);
   listRegisteredPluginAgentPromptGuidanceMock.mockReset();
   listRegisteredPluginAgentPromptGuidanceMock.mockImplementation((params?: { surface?: string }) =>
     params?.surface === "subagent"
@@ -396,6 +412,17 @@ export function resetCompactHooksHarnessMocks(): void {
   resetCompactSessionStateMocks();
   createOpenClawCodingToolsMock.mockReset();
   createOpenClawCodingToolsMock.mockReturnValue([]);
+  createBundleMcpToolRuntimeMock.mockReset();
+  createBundleMcpToolRuntimeMock.mockResolvedValue({
+    tools: [],
+    dispose: vi.fn(async () => {}),
+  });
+  createBundleLspToolRuntimeMock.mockReset();
+  createBundleLspToolRuntimeMock.mockResolvedValue({
+    tools: [],
+    sessions: [],
+    dispose: vi.fn(async () => {}),
+  });
   guardSessionManagerMock.mockReset();
   guardSessionManagerMock.mockReturnValue({
     flushPendingToolResults: vi.fn(),
@@ -594,20 +621,13 @@ export async function loadCompactHooksHarness(): Promise<{
     resolveBootstrapContextForRun: vi.fn(async () => ({ contextFiles: [] })),
   }));
 
-  vi.doMock("../bundle-mcp-tools.js", () => ({
+  vi.doMock("../agent-bundle-mcp-tools.js", () => ({
     retireSessionMcpRuntime: vi.fn(async () => true),
-    createBundleMcpToolRuntime: vi.fn(async () => ({
-      tools: [],
-      dispose: vi.fn(async () => {}),
-    })),
+    createBundleMcpToolRuntime: createBundleMcpToolRuntimeMock,
   }));
 
-  vi.doMock("../bundle-lsp-runtime.js", () => ({
-    createBundleLspToolRuntime: vi.fn(async () => ({
-      tools: [],
-      sessions: [],
-      dispose: vi.fn(async () => {}),
-    })),
+  vi.doMock("../agent-bundle-lsp-runtime.js", () => ({
+    createBundleLspToolRuntime: createBundleLspToolRuntimeMock,
   }));
 
   vi.doMock("../docs-path.js", () => ({

@@ -5,6 +5,8 @@ import {
   applyAgentCompactionSettingsFromConfigMock,
   buildEmbeddedSystemPromptMock,
   contextEngineCompactMock,
+  createBundleLspToolRuntimeMock,
+  createBundleMcpToolRuntimeMock,
   createAgentSessionMock,
   createPreparedEmbeddedAgentSettingsManagerMock,
   createOpenClawCodingToolsMock,
@@ -30,6 +32,7 @@ import {
   rotateTranscriptAfterCompactionMock,
   resetCompactHooksHarnessMocks,
   resetCompactSessionStateMocks,
+  runtimePlanToolsNormalizeMock,
   sessionAbortCompactionMock,
   sessionMessages,
   sessionCompactImpl,
@@ -464,14 +467,33 @@ describe("compactEmbeddedAgentSessionDirect hooks", () => {
       authStorage: { setRuntimeApiKey: vi.fn() },
       modelRegistry: {},
     });
+    runtimePlanToolsNormalizeMock.mockImplementation((tools) => {
+      for (const tool of tools as Array<{ parameters?: unknown }>) {
+        void tool.parameters;
+      }
+      return tools;
+    });
+    const unreadableSchemaTool: Record<string, unknown> = {
+      name: "fuzzplugin_move_delta",
+      label: "Fuzz Plugin Move Delta",
+      description: "Synthetic malformed tool.",
+      execute: async () => ({ text: "bad" }),
+    };
+    Object.defineProperty(unreadableSchemaTool, "parameters", {
+      enumerable: true,
+      get() {
+        throw new Error("fuzzplugin tool schema is unreadable");
+      },
+    });
     createOpenClawCodingToolsMock.mockReturnValueOnce([
       {
-        name: "healthy_lookup",
+        name: "mockplugin_lookup",
         label: "Healthy Lookup",
         description: "Look up safe data.",
         parameters: { type: "object", properties: {} },
         execute: async () => ({ text: "ok" }),
       },
+      unreadableSchemaTool,
       {
         name: "fuzzplugin_move_angles",
         label: "FuzzPlugin Move Angles",
@@ -490,10 +512,18 @@ describe("compactEmbeddedAgentSessionDirect hooks", () => {
     });
 
     const sessionOptions = expectRecordFields(mockCallArg(createAgentSessionMock), {});
+    const bundleMcpOptions = expectRecordFields(mockCallArg(createBundleMcpToolRuntimeMock), {});
+    expect(bundleMcpOptions.reservedToolNames).toEqual(
+      expect.arrayContaining(["mockplugin_lookup", "fuzzplugin_move_delta"]),
+    );
+    const bundleLspOptions = expectRecordFields(mockCallArg(createBundleLspToolRuntimeMock), {});
+    expect(bundleLspOptions.reservedToolNames).toEqual(
+      expect.arrayContaining(["mockplugin_lookup", "fuzzplugin_move_delta"]),
+    );
     expect(
       (sessionOptions.customTools as Array<{ name: string }>).map((tool) => tool.name),
-    ).toEqual(["healthy_lookup"]);
-    expect(sessionOptions.tools).toEqual(["healthy_lookup"]);
+    ).toEqual(["mockplugin_lookup"]);
+    expect(sessionOptions.tools).toEqual(["mockplugin_lookup"]);
   });
 
   it("clamps the caller context token budget to the compaction model", async () => {
