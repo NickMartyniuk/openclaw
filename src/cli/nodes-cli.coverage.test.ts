@@ -56,6 +56,7 @@ const { runtimeErrors, defaultRuntime } = mocks;
 vi.mock("../gateway/call.js", () => ({
   callGateway: (opts: unknown) => callGateway(opts as NodeInvokeCall),
   randomIdempotencyKey: () => randomIdempotencyKey(),
+  resolveGatewayCliScopes: () => [],
 }));
 
 vi.mock("../runtime.js", async () => ({
