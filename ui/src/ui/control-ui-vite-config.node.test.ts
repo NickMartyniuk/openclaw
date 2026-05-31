@@ -54,8 +54,11 @@ describe("Control UI Vite config", () => {
 
   it("uses a browser-safe redactor for shared tool display imports", async () => {
     const plugin = controlUiBrowserOnlySharedModuleAliases();
-    const resolveId = plugin.resolveId;
-    expect(typeof resolveId).toBe("function");
+    const resolveId =
+      typeof plugin.resolveId === "function" ? plugin.resolveId : plugin.resolveId?.handler;
+    if (typeof resolveId !== "function") {
+      throw new Error("expected resolveId hook");
+    }
 
     const resolved = await resolveId.call(
       {} as never,
