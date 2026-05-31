@@ -8,7 +8,7 @@ import {
   parseAgentSessionKey,
 } from "../routing/session-key.js";
 import type { ChatLog } from "./components/chat-log.js";
-import type { TuiAgentsList, TuiBackend } from "./tui-backend.js";
+import type { TuiAgentsList, TuiBackend, TuiSessionMutationResult } from "./tui-backend.js";
 import { asString, extractTextFromMessage, isCommandMessage } from "./tui-formatters.js";
 import { TUI_SESSION_LOOKUP_LIMIT } from "./tui-session-list-policy.js";
 import type { SessionInfo, TuiOptions, TuiStateAccess } from "./tui-types.js";
@@ -34,6 +34,7 @@ type SessionActionContext = {
   setActivityStatus: (text: string) => void;
   clearLocalRunIds?: () => void;
   rememberSessionKey?: (sessionKey: string) => void | Promise<void>;
+  emptySessionInfoDefaults?: SessionInfo;
 };
 
 type SessionInfoDefaults = {
@@ -66,8 +67,10 @@ export function createSessionActions(context: SessionActionContext) {
     setActivityStatus,
     clearLocalRunIds,
     rememberSessionKey,
+    emptySessionInfoDefaults,
   } = context;
-  let refreshSessionInfoPromise: Promise<void> = Promise.resolve();
+  let refreshSessionInfoInFlight: Promise<void> | null = null;
+  let refreshSessionInfoQueued = false;
   let lastSessionDefaults: SessionInfoDefaults | null = null;
 
   const applyAgentsResult = (result: TuiAgentsList) => {
@@ -272,15 +275,30 @@ export function createSessionActions(context: SessionActionContext) {
     }
   };
 
-  const refreshSessionInfo = async () => {
-    refreshSessionInfoPromise = refreshSessionInfoPromise.then(
-      runRefreshSessionInfo,
-      runRefreshSessionInfo,
-    );
-    await refreshSessionInfoPromise;
+  const drainRefreshSessionInfo = async () => {
+    do {
+      // Many TUI paths ask for the same session snapshot at once; keep one in-flight
+      // lookup and at most one follow-up so bursts do not queue stale backend calls.
+      refreshSessionInfoQueued = false;
+      await runRefreshSessionInfo();
+    } while (refreshSessionInfoQueued);
   };
 
-  const applySessionInfoFromPatch = (result?: SessionsPatchResult | null) => {
+  const refreshSessionInfo = async () => {
+    if (refreshSessionInfoInFlight) {
+      refreshSessionInfoQueued = true;
+      await refreshSessionInfoInFlight;
+      return;
+    }
+    refreshSessionInfoInFlight = drainRefreshSessionInfo().finally(() => {
+      refreshSessionInfoInFlight = null;
+    });
+    await refreshSessionInfoInFlight;
+  };
+
+  const applySessionInfoFromPatch = (
+    result?: SessionsPatchResult | TuiSessionMutationResult | null,
+  ) => {
     if (!result?.entry) {
       return;
     }
@@ -299,6 +317,31 @@ export function createSessionActions(context: SessionActionContext) {
           }
         : result.entry;
     applySessionInfo({ entry, force: true });
+  };
+
+  const clearDisplayedSession = (key = state.currentSessionKey) => {
+    chatLog.clearAll();
+    btw.clear();
+    chatLog.addSystem(`session ${key}`);
+    state.historyLoaded = true;
+    void rememberSessionKey?.(key);
+    tui.requestRender();
+  };
+
+  const applySessionMutationResult = (result?: TuiSessionMutationResult | null): boolean => {
+    if (!result?.entry) {
+      return false;
+    }
+    if (result.key && result.key !== state.currentSessionKey) {
+      updateAgentFromSessionKey(result.key);
+      state.currentSessionKey = result.key;
+      updateHeader();
+    }
+    const sessionId = result.entry.sessionId;
+    state.currentSessionId = typeof sessionId === "string" ? sessionId : null;
+    applySessionInfoFromPatch(result);
+    clearDisplayedSession();
+    return true;
   };
 
   const loadHistory = async () => {
@@ -403,6 +446,36 @@ export function createSessionActions(context: SessionActionContext) {
     await loadHistory();
   };
 
+  const setEmptySession = async (rawKey: string) => {
+    const nextKey = resolveSessionKey(rawKey);
+    updateAgentFromSessionKey(nextKey);
+    state.currentSessionKey = nextKey;
+    state.activeChatRunId = null;
+    state.pendingChatRunId = null;
+    state.pendingOptimisticUserMessage = false;
+    setActivityStatus("idle");
+    state.currentSessionId = null;
+    const defaults = lastSessionDefaults;
+    state.sessionInfo = {
+      ...emptySessionInfoDefaults,
+      modelProvider: defaults?.modelProvider ?? undefined,
+      model: defaults?.model ?? undefined,
+      contextTokens: defaults?.contextTokens ?? null,
+      thinkingLevels: defaults?.thinkingLevels ?? emptySessionInfoDefaults?.thinkingLevels,
+      inputTokens: null,
+      outputTokens: null,
+      totalTokens: null,
+      goal: undefined,
+      updatedAt: null,
+      displayName: undefined,
+    };
+    clearLocalRunIds?.();
+    updateHeader();
+    updateAutocompleteProvider();
+    updateFooter();
+    clearDisplayedSession();
+  };
+
   const abortActive = async (params?: { preferActive?: boolean }) => {
     if (
       opts.local === true &&
@@ -455,8 +528,10 @@ export function createSessionActions(context: SessionActionContext) {
     refreshAgents,
     refreshSessionInfo,
     applySessionInfoFromPatch,
+    applySessionMutationResult,
     loadHistory,
     setSession,
+    setEmptySession,
     abortActive,
   };
 }
