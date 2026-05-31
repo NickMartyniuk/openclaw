@@ -38,6 +38,7 @@ function isNodePendingWorkPriority(value: string): value is NodePendingWorkPrior
   return value === "default" || value === "high" || value === "normal";
 }
 
+/** Gateway handlers for queueing work until a paired node reconnects. */
 export const nodePendingHandlers: GatewayRequestHandlers = {
   "node.pending.drain": async ({ params, respond, client, context }) => {
     if (!validateNodePendingDrainParams(params)) {
@@ -119,6 +120,8 @@ export const nodePendingHandlers: GatewayRequestHandlers = {
         );
         wakeTriggered = wake.available;
         if (wake.available) {
+          // Give the first wake a short reconnect window before forcing a
+          // second wake; this keeps normal APNs delivery cheap and quiet.
           const reconnected = await waitForNodeReconnect({
             nodeId: p.nodeId,
             context,
@@ -130,6 +133,8 @@ export const nodePendingHandlers: GatewayRequestHandlers = {
           );
         }
         if (!context.nodeRegistry.get(p.nodeId) && wake.available) {
+          // A forced retry is only useful after the first wake was deliverable
+          // but the node still has not reattached to the Gateway.
           const retryWake = await maybeWakeNodeWithApns(p.nodeId, {
             force: true,
             wakeReason: "node.pending",
