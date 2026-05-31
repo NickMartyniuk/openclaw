@@ -164,7 +164,7 @@ export const execApprovalsHandlers: GatewayRequestHandlers = {
     if (!requireApprovalsBaseHash(params, snapshot, respond)) {
       return;
     }
-    const incoming = (params as { file?: unknown }).file;
+    const incoming = params.file;
     if (!incoming || typeof incoming !== "object") {
       respond(
         false,
@@ -173,6 +173,7 @@ export const execApprovalsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Gateway protocol validation accepts the wire shape; the normalizer sanitizes enum-like policy fields.
     const normalized = normalizeExecApprovals(incoming as ExecApprovalsFile);
     const next = mergeExecApprovalsSocketDefaults({ normalized, current: snapshot.file });
     saveExecApprovals(next);
@@ -190,7 +191,7 @@ export const execApprovalsHandlers: GatewayRequestHandlers = {
     ) {
       return;
     }
-    const { nodeId } = params as { nodeId: string };
+    const { nodeId } = params;
     const id = resolveNodeIdOrRespond(nodeId, respond);
     if (!id) {
       return;
@@ -229,12 +230,10 @@ export const execApprovalsHandlers: GatewayRequestHandlers = {
     ) {
       return;
     }
-    const { nodeId, file, native, baseHash } = params as {
-      nodeId: string;
-      file?: ExecApprovalsFile;
-      native?: NativeExecApprovalPolicy;
-      baseHash?: string;
-    };
+    const { nodeId } = params;
+    const file = "file" in params ? params.file : undefined;
+    const native = "native" in params ? params.native : undefined;
+    const baseHash = "baseHash" in params ? params.baseHash : undefined;
     const id = resolveNodeIdOrRespond(nodeId, respond);
     if (!id) {
       return;

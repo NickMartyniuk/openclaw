@@ -18,6 +18,7 @@ import {
   resolveGatewayPort as resolveGatewayPortFromPaths,
   resolveStateDir as resolveStateDirFromPaths,
 } from "../config/paths.js";
+import type { GatewayRemoteConfig } from "../config/types.gateway.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { loadDeviceAuthToken } from "../infra/device-auth-store.js";
 import { loadOrCreateDeviceIdentity, type DeviceIdentity } from "../infra/device-identity.js";
@@ -541,18 +542,11 @@ export function ensureExplicitGatewayAuth(params: {
   throw new GatewayExplicitAuthRequiredError(message);
 }
 
-type GatewayRemoteSettings = {
-  url?: string;
-  token?: string;
-  password?: string;
-  tlsFingerprint?: string;
-};
-
 type ResolvedGatewayCallContext = {
   config: OpenClawConfig;
   configPath: string;
   isRemoteMode: boolean;
-  remote?: GatewayRemoteSettings;
+  remote?: GatewayRemoteConfig;
   urlOverride?: string;
   urlOverrideSource?: "cli" | "env";
   remoteUrl?: string;
@@ -623,9 +617,7 @@ async function resolveGatewayCallContext(
       : await loadGatewayConfig());
   const configPath = opts.configPath ?? resolveGatewayConfigPath(process.env);
   const isRemoteMode = config.gateway?.mode === "remote";
-  const remote = isRemoteMode
-    ? (config.gateway?.remote as GatewayRemoteSettings | undefined)
-    : undefined;
+  const remote = isRemoteMode ? config.gateway?.remote : undefined;
   const remoteUrl = trimToUndefined(remote?.url);
   return {
     config,
@@ -903,17 +895,9 @@ async function executeGatewayRequestWithScopes<T>(params: {
         clearTimeout(timer);
       }
     };
-    const stopClientThenSettle = (
-      activeClient: GatewayClient | undefined,
-      err?: Error,
-      value?: T,
-    ) => {
+    const stopClientThenSettle = (activeClient: GatewayClient | undefined, settle: () => void) => {
       const complete = () => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(value as T);
-        }
+        settle();
       };
       if (!activeClient) {
         complete();
@@ -921,13 +905,21 @@ async function executeGatewayRequestWithScopes<T>(params: {
       }
       void stopGatewayClient(activeClient).finally(complete);
     };
-    const stop = (err?: Error, value?: T) => {
+    const stopWithError = (err: Error) => {
       if (settled) {
         return;
       }
       settled = true;
       cleanup();
-      stopClientThenSettle(client, err, value);
+      stopClientThenSettle(client, () => reject(err));
+    };
+    const stopWithValue = (value: T) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      stopClientThenSettle(client, () => resolve(value));
     };
     const abortHandler: (() => void) | undefined = () => {
       if (settled) {
@@ -938,7 +930,7 @@ async function executeGatewayRequestWithScopes<T>(params: {
       cleanup();
       const err = createGatewayRequestAbortError(opts.method);
       const activeClient = client;
-      const stopAfterAbortHook = () => stopClientThenSettle(activeClient, err);
+      const stopAfterAbortHook = () => stopClientThenSettle(activeClient, () => reject(err));
       if (!activeClient || !opts.onSignalAbort || !primaryRequestStarted) {
         stopAfterAbortHook();
         return;
@@ -988,10 +980,10 @@ async function executeGatewayRequestWithScopes<T>(params: {
             onAccepted: opts.onAccepted,
           });
           ignoreClose = true;
-          stop(undefined, result);
+          stopWithValue(result);
         } catch (err) {
           ignoreClose = true;
-          stop(err as Error);
+          stopWithError(err instanceof Error ? err : new Error(String(err)));
         }
       },
       onClose: (code, reason) => {
@@ -999,7 +991,7 @@ async function executeGatewayRequestWithScopes<T>(params: {
           return;
         }
         ignoreClose = true;
-        stop(
+        stopWithError(
           createGatewayCloseTransportError({
             code,
             reason,
@@ -1012,13 +1004,13 @@ async function executeGatewayRequestWithScopes<T>(params: {
           return;
         }
         ignoreClose = true;
-        stop(err);
+        stopWithError(err);
       },
     });
 
     const timer: NodeJS.Timeout | undefined = setTimeout(() => {
       ignoreClose = true;
-      stop(
+      stopWithError(
         createGatewayTimeoutTransportError({
           timeoutMs,
           connectionDetails: params.connectionDetails,
@@ -1035,7 +1027,7 @@ async function executeGatewayRequestWithScopes<T>(params: {
           return;
         }
         ignoreClose = true;
-        stop(
+        stopWithError(
           createGatewayTimeoutTransportError({
             timeoutMs,
             connectionDetails: params.connectionDetails,
@@ -1047,7 +1039,7 @@ async function executeGatewayRequestWithScopes<T>(params: {
           return;
         }
         ignoreClose = true;
-        stop(err instanceof Error ? err : new Error(String(err)));
+        stopWithError(err instanceof Error ? err : new Error(String(err)));
       });
   });
 }

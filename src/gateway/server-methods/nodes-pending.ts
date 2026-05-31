@@ -30,6 +30,14 @@ function resolveClientNodeId(
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function isNodePendingWorkType(value: string): value is NodePendingWorkType {
+  return value === "location.request" || value === "status.request";
+}
+
+function isNodePendingWorkPriority(value: string): value is NodePendingWorkPriority {
+  return value === "default" || value === "high" || value === "normal";
+}
+
 export const nodePendingHandlers: GatewayRequestHandlers = {
   "node.pending.drain": async ({ params, respond, client, context }) => {
     if (!validateNodePendingDrainParams(params)) {
@@ -55,7 +63,7 @@ export const nodePendingHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const p = params as { maxItems?: number };
+    const p = params;
     const drained = drainNodePendingWork(nodeId, {
       maxItems: p.maxItems,
       includeDefaultStatus: true,
@@ -71,18 +79,25 @@ export const nodePendingHandlers: GatewayRequestHandlers = {
       });
       return;
     }
-    const p = params as {
-      nodeId: string;
-      type: NodePendingWorkType;
-      priority?: NodePendingWorkPriority;
-      expiresInMs?: number;
-      wake?: boolean;
-    };
+    const p = params;
+    if (
+      !isNodePendingWorkType(p.type) ||
+      (p.priority !== undefined && !isNodePendingWorkPriority(p.priority))
+    ) {
+      respondInvalidParams({
+        respond,
+        method: "node.pending.enqueue",
+        validator: validateNodePendingEnqueueParams,
+      });
+      return;
+    }
+    const pendingType = p.type;
+    const pendingPriority = p.priority;
     await respondUnavailableOnThrow(respond, async () => {
       const queued = enqueueNodePendingWork({
         nodeId: p.nodeId,
-        type: p.type,
-        priority: p.priority,
+        type: pendingType,
+        priority: pendingPriority,
         expiresInMs: p.expiresInMs,
       });
       let wakeTriggered = false;
